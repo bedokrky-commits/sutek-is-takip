@@ -24,3 +24,4 @@ npm run dev
 Sonra http://localhost:3000 adresini açın.
 
 `.env.local` dosyasında SUTEK İş Takip Supabase projesinin publishable bağlantı bilgileri hazırdır. Service role / secret anahtar içermez.
+SUTEK İş Takip Sistemi
