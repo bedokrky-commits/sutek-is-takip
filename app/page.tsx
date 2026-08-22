@@ -67,6 +67,7 @@ export default function Home() {
   const [serviceProfiles, setServiceProfiles] = useState<Profile[]>([])
   const [editJob, setEditJob] = useState<Job | null>(null)
   const [jobQuickFilter, setJobQuickFilter] = useState<'all' | 'urgent' | 'late' | 'upcoming'>('all')
+  const [navigationJob, setNavigationJob] = useState<Job | null>(null)
   const [signedIn, setSignedIn] = useState(!configured)
   const [currentUserId, setCurrentUserId] = useState('')
   const [loading, setLoading] = useState(true)
@@ -434,10 +435,17 @@ export default function Home() {
     setReportJob(null)
   }
 
-  function openMap(address?: string | null) {
+  function openNavigation(provider: 'google' | 'apple' | 'yandex', address?: string | null) {
     const value = (address || '').trim()
     if (!value) return alert('Bu iş için adres girilmemiş.')
-    window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(value)}`, '_blank', 'noopener,noreferrer')
+    const query = encodeURIComponent(value)
+    const urls = {
+      google: `https://www.google.com/maps/search/?api=1&query=${query}`,
+      apple: `https://maps.apple.com/?q=${query}`,
+      yandex: `https://yandex.com/maps/?text=${query}`
+    }
+    window.open(urls[provider], '_blank', 'noopener,noreferrer')
+    setNavigationJob(null)
   }
 
   function whatsappCustomerReport(job: Job) {
@@ -807,7 +815,7 @@ export default function Home() {
               <div className="actions">
                 {canSchedule && <button onClick={() => setEditJob(job)}>Düzenle</button>}
                 <a className="actionLink" href={`tel:${job.customer_phone}`}>Ara</a>
-                {job.customer_address && <button onClick={() => openMap(job.customer_address)}>Haritada Aç</button>}
+                {job.customer_address && <button onClick={() => setNavigationJob(job)}>Navigasyon</button>}
                 <button onClick={() => setHistoryPhone(job.customer_phone)}>Geçmiş</button>
                 <button onClick={() => setFilesJob(job)}>Dosyalar ({attachments.filter(a => a.job_id === job.id).length})</button>
                 <button onClick={() => uploadJobFile(job)} disabled={fileBusy}>+ Dosya</button>
@@ -890,6 +898,18 @@ export default function Home() {
           </article>)}</div>
         </div>}
     </section>
+
+    {navigationJob && <div className="modalBackdrop" onMouseDown={() => setNavigationJob(null)}>
+      <div className="modal navigationModal" onMouseDown={e => e.stopPropagation()}>
+        <div className="modalHead"><div><h2>Navigasyon Seç</h2><p>{navigationJob.customer_name}</p></div><button onClick={() => setNavigationJob(null)}>×</button></div>
+        <div className="navigationAddress">📍 {navigationJob.customer_address}</div>
+        <div className="navigationChoices">
+          <button onClick={() => openNavigation('google', navigationJob.customer_address)}><b>Google Maps</b><span>Google Maps ile aç</span></button>
+          <button onClick={() => openNavigation('apple', navigationJob.customer_address)}><b>Apple Maps</b><span>Apple Haritalar ile aç</span></button>
+          <button onClick={() => openNavigation('yandex', navigationJob.customer_address)}><b>Yandex Navigasyon</b><span>Yandex Maps ile aç</span></button>
+        </div>
+      </div>
+    </div>}
 
     {editJob && canSchedule && <div className="modalBackdrop" onMouseDown={() => setEditJob(null)}>
       <div className="modal" onMouseDown={e => e.stopPropagation()}>
