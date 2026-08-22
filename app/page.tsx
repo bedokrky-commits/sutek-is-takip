@@ -1,6 +1,6 @@
 'use client'
 
-import { FormEvent, useEffect, useMemo, useState } from 'react'
+import { FormEvent, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import { createClient } from '../lib/supabase/client'
 import './v06-additions.css'
 
@@ -22,6 +22,12 @@ type Job = {
   assigned_to?: string | null
   priority?: 'normal' | 'urgent'
   assignee?: { full_name?: string } | null
+  service_no?: string | null
+  repeat_months?: number | null
+  next_maintenance_at?: string | null
+  signature_path?: string | null
+  signature_name?: string | null
+  signed_at?: string | null
 }
 type Attachment = {
   id: string
@@ -35,6 +41,14 @@ type Attachment = {
 type Notice = { id: string; title?: string; message: string; created_at: string; is_read: boolean; job_id?: string | null }
 type Profile = { id: string; full_name: string; email?: string | null; role: Role; is_active: boolean; phone?: string | null }
 type JobHistory = { id: string; job_id: string; new_status: Status; created_at: string; changed_by?: string | null; changer?: { full_name?: string; role?: Role } | null }
+type JobComment = {
+  id: string
+  job_id: string
+  author_id: string
+  message: string
+  created_at: string
+  author?: { full_name?: string; role?: Role } | null
+}
 type ServiceReport = {
   id: string
   job_id: string
@@ -70,6 +84,7 @@ export default function Home() {
   const [profiles, setProfiles] = useState<Profile[]>([])
   const [jobHistory, setJobHistory] = useState<JobHistory[]>([])
   const [serviceReports, setServiceReports] = useState<ServiceReport[]>([])
+  const [jobComments, setJobComments] = useState<JobComment[]>([])
   const [attachments, setAttachments] = useState<Attachment[]>([])
   const [filesJob, setFilesJob] = useState<Job | null>(null)
   const [reportJob, setReportJob] = useState<Job | null>(null)
@@ -84,6 +99,13 @@ export default function Home() {
   const [editJob, setEditJob] = useState<Job | null>(null)
   const [jobQuickFilter, setJobQuickFilter] = useState<'all' | 'urgent' | 'late' | 'upcoming'>('all')
   const [navigationJob, setNavigationJob] = useState<Job | null>(null)
+  const [commentsJob, setCommentsJob] = useState<Job | null>(null)
+  const [commentDraft, setCommentDraft] = useState('')
+  const [signatureJob, setSignatureJob] = useState<Job | null>(null)
+  const signatureCanvasRef = useRef<HTMLCanvasElement | null>(null)
+  const signatureDrawingRef = useRef(false)
+  const [calendarMode, setCalendarMode] = useState<'month' | 'week'>('month')
+  const [calendarAnchor, setCalendarAnchor] = useState(localDateInputValue())
   const [signedIn, setSignedIn] = useState(!configured)
   const [currentUserId, setCurrentUserId] = useState('')
   const [loading, setLoading] = useState(true)
@@ -92,7 +114,7 @@ export default function Home() {
   const [profileName, setProfileName] = useState('SUTEK Kullanıcısı')
   const [role, setRole] = useState<Role>('office')
   const [filter, setFilter] = useState<'bugun' | 'bekleyen' | 'tamamlanan'>('bugun')
-  const [view, setView] = useState<'jobs' | 'personnel' | 'customers' | 'reports'>('jobs')
+  const [view, setView] = useState<'jobs' | 'calendar' | 'maintenance' | 'dashboard' | 'personnel' | 'customers' | 'reports'>('jobs')
   const [search, setSearch] = useState('')
   const [customerSearch, setCustomerSearch] = useState('')
   const [historyPhone, setHistoryPhone] = useState<string | null>(null)
@@ -125,17 +147,19 @@ export default function Home() {
       setRole(profile.role as Role)
     }
 
-    const [{ data: js }, { data: ns }, { data: hs }, { data: sr }, { data: at }] = await Promise.all([
+    const [{ data: js }, { data: ns }, { data: hs }, { data: sr }, { data: cm }, { data: at }] = await Promise.all([
       supabase.from('jobs').select('*, creator:profiles!jobs_created_by_fkey(full_name), assignee:profiles!jobs_assigned_to_fkey(full_name)').order('scheduled_at', { ascending: true }),
       supabase.from('notifications').select('*').eq('user_id', user.id).order('created_at', { ascending: false }).limit(30),
       supabase.from('job_status_history').select('id,job_id,new_status,created_at,changed_by,changer:profiles!job_status_history_changed_by_fkey(full_name,role)').order('created_at', { ascending: true }),
       supabase.from('service_reports').select('id,job_id,work_performed,parts_used,internal_note,created_by,updated_by,created_at,updated_at').order('updated_at', { ascending: false }),
+      supabase.from('job_comments').select('id,job_id,author_id,message,created_at,author:profiles!job_comments_author_id_fkey(full_name,role)').order('created_at', { ascending: true }),
       supabase.from('job_attachments').select('id,job_id,file_name,storage_path,mime_type,file_size,created_at').order('created_at', { ascending: false })
     ])
     setJobs((js ?? []) as Job[])
     setNotices((ns ?? []) as Notice[])
     setJobHistory((hs ?? []) as JobHistory[])
     setServiceReports((sr ?? []) as ServiceReport[])
+    setJobComments((cm ?? []) as JobComment[])
     setAttachments((at ?? []) as Attachment[])
 
     if (profile?.role === 'admin') {
@@ -150,7 +174,7 @@ export default function Home() {
     } else {
       setProfiles([])
       setServiceProfiles([])
-      if (view === 'personnel' || view === 'reports') setView('jobs')
+      if (view === 'personnel' || view === 'reports' || view === 'dashboard' || view === 'maintenance') setView('jobs')
     }
     setLoading(false)
   }
@@ -218,6 +242,16 @@ export default function Home() {
       .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'service_reports' }, payload => {
         const id = String((payload.old as { id?: string })?.id || '')
         if (id) setServiceReports(current => current.filter(r => r.id !== id))
+      })
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'job_comments' }, payload => {
+        const raw = payload.new as JobComment
+        void supabase!.from('job_comments').select('id,job_id,author_id,message,created_at,author:profiles!job_comments_author_id_fkey(full_name,role)').eq('id', raw.id).single().then(({ data }) => {
+          if (data) setJobComments(current => current.some(c => c.id === data.id) ? current : [...current, data as JobComment])
+        })
+      })
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'job_comments' }, payload => {
+        const id = String((payload.old as { id?: string })?.id || '')
+        if (id) setJobComments(current => current.filter(c => c.id !== id))
       })
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'job_attachments' }, payload => {
         const file = payload.new as Attachment
@@ -289,6 +323,7 @@ export default function Home() {
       description: String(fd.get('description')).trim(),
       priority: String(fd.get('priority') || 'normal') === 'urgent' ? 'urgent' : 'normal',
       assigned_to: String(fd.get('assigned_to') || '') || null,
+      repeat_months: Number(fd.get('repeat_months') || 0) || null,
       created_by: auth.user.id
     }).select('*, creator:profiles!jobs_created_by_fkey(full_name), assignee:profiles!jobs_assigned_to_fkey(full_name)').single()
     if (error) return alert(error.message)
@@ -356,7 +391,8 @@ export default function Home() {
         description: String(fd.get('description')).trim(),
         scheduled_at: scheduled.toISOString(),
         priority: String(fd.get('priority') || 'normal'),
-        assigned_to: String(fd.get('assigned_to') || '') || null
+        assigned_to: String(fd.get('assigned_to') || '') || null,
+        repeat_months: Number(fd.get('repeat_months') || 0) || null
       }
     })
     if (error || data?.error) return alert(data?.error || error?.message || 'İş düzenlenemedi.')
@@ -550,13 +586,14 @@ export default function Home() {
       return data?.signedUrl ? { name: file.file_name, url: data.signedUrl } : null
     }))
     const validImages = imageUrls.filter((item): item is { name: string; url: string } => Boolean(item))
+    const signatureUrl = job.signature_path ? (await supabase.storage.from('job-files').createSignedUrl(job.signature_path, 60 * 10)).data?.signedUrl : null
 
     const photosHtml = validImages.length
       ? `<section><h2>Servis Fotoğrafları</h2><div class="photos">${validImages.map(img => `<figure><img src="${img.url}" alt=""><figcaption>${escapeServiceHtml(img.name)}</figcaption></figure>`).join('')}</div></section>`
       : ''
 
     const logoUrl = `${window.location.origin}/sutek-logo.png`
-    const formNo = job.id.slice(0, 8).toUpperCase()
+    const formNo = job.service_no || job.id.slice(0, 8).toUpperCase()
 
     popup.document.open()
     popup.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>SUTEK Servis Formu ${formNo}</title><style>
@@ -566,7 +603,7 @@ export default function Home() {
       .meta{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin:20px 0}.meta div{border:1px solid #dde2e8;border-radius:8px;padding:10px}.meta span{display:block;color:#6b7280;font-size:10px;text-transform:uppercase;margin-bottom:4px}.meta b{font-size:13px}
       h2{font-size:15px;margin:22px 0 8px;border-bottom:1px solid #e3e6ea;padding-bottom:7px}.box{border:1px solid #dde2e8;border-radius:8px;padding:12px;min-height:52px;font-size:12px;line-height:1.5}
       .photos{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}.photos figure{margin:0;border:1px solid #dde2e8;border-radius:8px;overflow:hidden}.photos img{display:block;width:100%;max-height:300px;object-fit:contain;background:#f5f6f8}.photos figcaption{font-size:10px;color:#6b7280;padding:7px}
-      .footer{margin-top:28px;border-top:1px solid #dfe3e8;padding-top:12px;font-size:10px;color:#6b7280;display:flex;justify-content:space-between}
+      .signaturePrint{display:flex;align-items:center;gap:18px;border:1px solid #dde2e8;border-radius:8px;padding:12px}.signaturePrint img{width:220px;max-height:100px;object-fit:contain}.signaturePrint span{font-size:10px;color:#6b7280}.footer{margin-top:28px;border-top:1px solid #dfe3e8;padding-top:12px;font-size:10px;color:#6b7280;display:flex;justify-content:space-between}
       .actions{margin:18px 0}.actions button{padding:10px 16px;border:1px solid #172033;background:#172033;color:#fff;border-radius:7px}
       @media print{body{padding:0}.actions{display:none}.photos img{max-height:240px}}
     </style></head><body>
@@ -584,6 +621,7 @@ export default function Home() {
       <h2>Kullanılan / Değiştirilen Parçalar</h2><div class="box">${escapeServiceHtml(serviceReport.parts_used || 'Parça kullanılmadı / belirtilmedi.')}</div>
       <h2>Müşteriye Sunulan Servis Raporu</h2><div class="box">${escapeServiceHtml(job.customer_report || '')}</div>
       ${photosHtml}
+      ${signatureUrl ? `<h2>Müşteri Onayı / İmza</h2><div class="signaturePrint"><img src="${signatureUrl}" alt="İmza"><div><b>${escapeServiceHtml(job.signature_name || '')}</b><br><span>${job.signed_at ? new Date(job.signed_at).toLocaleString('tr-TR') : ''}</span></div></div>` : ''}
       <div class="footer"><span>SUTEK</span><span>Bu form elektronik ortamda oluşturulmuştur.</span></div>
       <div class="actions"><button onclick="window.print()">PDF / Yazdır</button></div>
       <script>setTimeout(()=>window.print(),700)</script>
@@ -715,6 +753,109 @@ export default function Home() {
       <script>setTimeout(()=>window.print(),400)</script>
     </body></html>`)
     popup.document.close()
+  }
+
+  async function addJobComment() {
+    if (!supabase || !commentsJob || !commentDraft.trim()) return
+    const message = commentDraft.trim()
+    const { data: auth } = await supabase.auth.getUser()
+    if (!auth.user) return
+    const { data, error } = await supabase.from('job_comments').insert({
+      job_id: commentsJob.id,
+      author_id: auth.user.id,
+      message
+    }).select('id,job_id,author_id,message,created_at,author:profiles!job_comments_author_id_fkey(full_name,role)').single()
+    if (error) return alert('Not eklenemedi: ' + error.message)
+    if (data) setJobComments(current => current.some(c => c.id === data.id) ? current : [...current, data as JobComment])
+    setCommentDraft('')
+  }
+
+  async function deleteJobComment(comment: JobComment) {
+    if (!supabase) return
+    if (!confirm('Bu notu silmek istediğinize emin misiniz?')) return
+    const { error } = await supabase.from('job_comments').delete().eq('id', comment.id)
+    if (error) return alert('Not silinemedi: ' + error.message)
+    setJobComments(current => current.filter(c => c.id !== comment.id))
+  }
+
+  function signaturePoint(e: ReactPointerEvent<HTMLCanvasElement>) {
+    const canvas = signatureCanvasRef.current
+    if (!canvas) return null
+    const rect = canvas.getBoundingClientRect()
+    return { x: (e.clientX - rect.left) * (canvas.width / rect.width), y: (e.clientY - rect.top) * (canvas.height / rect.height) }
+  }
+
+  function signatureStart(e: ReactPointerEvent<HTMLCanvasElement>) {
+    const canvas = signatureCanvasRef.current
+    const point = signaturePoint(e)
+    if (!canvas || !point) return
+    signatureDrawingRef.current = true
+    canvas.setPointerCapture(e.pointerId)
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+    ctx.beginPath(); ctx.moveTo(point.x, point.y)
+  }
+
+  function signatureMove(e: ReactPointerEvent<HTMLCanvasElement>) {
+    if (!signatureDrawingRef.current) return
+    const canvas = signatureCanvasRef.current
+    const point = signaturePoint(e)
+    if (!canvas || !point) return
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+    ctx.lineWidth = 3; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = '#111827'
+    ctx.lineTo(point.x, point.y); ctx.stroke()
+  }
+
+  function signatureEnd() { signatureDrawingRef.current = false }
+
+  function clearSignature() {
+    const canvas = signatureCanvasRef.current
+    const ctx = canvas?.getContext('2d')
+    if (canvas && ctx) ctx.clearRect(0, 0, canvas.width, canvas.height)
+  }
+
+  async function saveSignature() {
+    if (!supabase || !signatureJob || !signatureCanvasRef.current) return
+    const signer = prompt('İmza sahibinin adı soyadı')?.trim()
+    if (!signer) return
+    const canvas = signatureCanvasRef.current
+    const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png'))
+    if (!blob) return alert('İmza oluşturulamadı.')
+    const { data: auth } = await supabase.auth.getUser()
+    if (!auth.user) return
+    const path = `${auth.user.id}/${signatureJob.id}/signature-${Date.now()}.png`
+    const { error: uploadError } = await supabase.storage.from('job-files').upload(path, blob, { contentType: 'image/png' })
+    if (uploadError) return alert('İmza yüklenemedi: ' + uploadError.message)
+    if (signatureJob.signature_path) await supabase.storage.from('job-files').remove([signatureJob.signature_path])
+    const signedAt = new Date().toISOString()
+    const { data, error } = await supabase.from('jobs').update({ signature_path: path, signature_name: signer, signed_at: signedAt }).eq('id', signatureJob.id)
+      .select('*, creator:profiles!jobs_created_by_fkey(full_name), assignee:profiles!jobs_assigned_to_fkey(full_name)').single()
+    if (error) return alert('İmza kaydedilemedi: ' + error.message)
+    if (data) setJobs(current => current.map(j => j.id === signatureJob.id ? data as Job : j))
+    setSignatureJob(null)
+  }
+
+  async function createMaintenanceJob(source: Job) {
+    if (!supabase || !canSchedule || !source.next_maintenance_at) return
+    if (!confirm(`${source.customer_name} için periyodik bakım işi oluşturulsun mu?`)) return
+    const { data: auth } = await supabase.auth.getUser()
+    if (!auth.user) return
+    const { data, error } = await supabase.from('jobs').insert({
+      scheduled_at: source.next_maintenance_at,
+      customer_name: source.customer_name,
+      customer_phone: source.customer_phone,
+      customer_address: source.customer_address || null,
+      description: `Periyodik bakım: ${source.description}`,
+      priority: 'normal',
+      assigned_to: source.assigned_to || null,
+      repeat_months: source.repeat_months || null,
+      created_by: auth.user.id
+    }).select('*, creator:profiles!jobs_created_by_fkey(full_name), assignee:profiles!jobs_assigned_to_fkey(full_name)').single()
+    if (error) return alert('Bakım işi oluşturulamadı: ' + error.message)
+    await supabase.from('jobs').update({ next_maintenance_at: null }).eq('id', source.id)
+    if (data) setJobs(current => [...current.map(j => j.id === source.id ? { ...j, next_maintenance_at: null } : j), data as Job].sort((a,b)=>+new Date(a.scheduled_at)-+new Date(b.scheduled_at)))
+    alert('Periyodik bakım işi oluşturuldu.')
   }
 
   async function markAllRead() {
@@ -884,13 +1025,49 @@ export default function Home() {
   }
   const servicePerformanceReports = Array.from(serviceReportMap.values()).sort((a,b) => (b.completed + b.postponed) - (a.completed + a.postponed))
 
+  const maintenanceJobs = jobs.filter(j => j.next_maintenance_at).sort((a,b) => +new Date(a.next_maintenance_at!) - +new Date(b.next_maintenance_at!))
+  const dueMaintenance = maintenanceJobs.filter(j => new Date(j.next_maintenance_at!).getTime() <= Date.now() + 30 * 86400000)
+
+  const calendarAnchorDate = new Date(`${calendarAnchor}T12:00:00`)
+  const calendarYear = calendarAnchorDate.getFullYear()
+  const calendarMonthIndex = calendarAnchorDate.getMonth()
+  const monthFirst = new Date(calendarYear, calendarMonthIndex, 1, 12)
+  const mondayOffset = (monthFirst.getDay() + 6) % 7
+  const monthGridStart = new Date(monthFirst); monthGridStart.setDate(monthGridStart.getDate() - mondayOffset)
+  const calendarMonthDays = Array.from({ length: 42 }, (_, i) => { const d = new Date(monthGridStart); d.setDate(d.getDate() + i); return d })
+  const weekStart = new Date(calendarAnchorDate); weekStart.setDate(weekStart.getDate() - ((weekStart.getDay() + 6) % 7))
+  const calendarWeekDays = Array.from({ length: 7 }, (_, i) => { const d = new Date(weekStart); d.setDate(d.getDate() + i); return d })
+  const calendarDays = calendarMode === 'month' ? calendarMonthDays : calendarWeekDays
+  const jobsForDay = (d: Date) => jobs.filter(j => new Date(j.scheduled_at).toDateString() === d.toDateString()).sort((a,b)=>+new Date(a.scheduled_at)-+new Date(b.scheduled_at))
+  const shiftCalendar = (amount: number) => {
+    const d = new Date(`${calendarAnchor}T12:00:00`)
+    if (calendarMode === 'month') d.setMonth(d.getMonth() + amount)
+    else d.setDate(d.getDate() + amount * 7)
+    const local = new Date(d.getTime() - d.getTimezoneOffset()*60000)
+    setCalendarAnchor(local.toISOString().slice(0,10))
+  }
+
+  const dashboardTodayJobs = jobs.filter(j => new Date(j.scheduled_at).toDateString() === new Date().toDateString())
+  const dashboardOpen = jobs.filter(j => j.status !== 'completed')
+  const dashboardLate = dashboardOpen.filter(j => new Date(j.scheduled_at).getTime() < Date.now())
+  const dashboardThisMonth = jobs.filter(j => { const d=new Date(j.scheduled_at), n=new Date(); return d.getMonth()===n.getMonth() && d.getFullYear()===n.getFullYear() })
+  const dashboardCompletedMonth = dashboardThisMonth.filter(j => j.status === 'completed').length
+  const dashboardCompletionRate = dashboardThisMonth.length ? Math.round(dashboardCompletedMonth / dashboardThisMonth.length * 100) : 0
+  const dashboardLast7 = Array.from({length:7},(_,i)=>{ const d=new Date(); d.setHours(0,0,0,0); d.setDate(d.getDate()-(6-i)); return { d, count: jobs.filter(j=>new Date(j.scheduled_at).toDateString()===d.toDateString()).length, completed: jobs.filter(j=>new Date(j.scheduled_at).toDateString()===d.toDateString()&&j.status==='completed').length } })
+
   const viewTitle =
+    view === 'calendar' ? 'Takvim & Planlama' :
+    view === 'maintenance' ? 'Periyodik Bakımlar' :
+    view === 'dashboard' ? 'Yönetici Dashboard' :
     view === 'personnel' ? 'Personel Yönetimi' :
-    view === 'customers' ? 'Müşteri Geçmişi' :
+    view === 'customers' ? 'Müşteri Kartları' :
     view === 'reports' ? 'Raporlar' : 'İş Programı'
   const viewSubtitle =
+    view === 'calendar' ? 'Haftalık ve aylık iş planını görüntüleyin' :
+    view === 'maintenance' ? 'Yaklaşan periyodik bakımları planlayın' :
+    view === 'dashboard' ? 'Operasyonun güncel özetini tek ekranda görün' :
     view === 'personnel' ? 'Ofis ve servis kullanıcılarını yönetin' :
-    view === 'customers' ? 'Müşterilerin geçmiş iş kayıtlarını görüntüleyin' :
+    view === 'customers' ? 'Müşteri bilgileri, adresler ve tüm servis geçmişi' :
     view === 'reports' ? 'Tarih aralığı, servis performansı ve dışa aktarma' :
     new Intl.DateTimeFormat('tr-TR', { dateStyle: 'full' }).format(new Date())
 
@@ -901,7 +1078,10 @@ export default function Home() {
         <button className={view === 'jobs' && filter === 'bugun' ? 'active' : ''} onClick={() => { setView('jobs'); setFilter('bugun') }}>Bugünün İşleri</button>
         <button className={view === 'jobs' && filter === 'bekleyen' ? 'active' : ''} onClick={() => { setView('jobs'); setFilter('bekleyen') }}>Bekleyen İşler</button>
         <button className={view === 'jobs' && filter === 'tamamlanan' ? 'active' : ''} onClick={() => { setView('jobs'); setFilter('tamamlanan') }}>Tamamlananlar</button>
-        <button className={view === 'customers' ? 'active' : ''} onClick={() => setView('customers')}>Müşteri Geçmişi</button>
+        <button className={view === 'calendar' ? 'active' : ''} onClick={() => setView('calendar')}>Takvim & Planlama</button>
+        <button className={view === 'customers' ? 'active' : ''} onClick={() => setView('customers')}>Müşteri Kartları</button>
+        {canSeeReports && <button className={view === 'dashboard' ? 'active' : ''} onClick={() => setView('dashboard')}>Dashboard</button>}
+        {canSeeReports && <button className={view === 'maintenance' ? 'active' : ''} onClick={() => setView('maintenance')}>Periyodik Bakım</button>}
         {canSeeReports && <button className={view === 'reports' ? 'active' : ''} onClick={() => setView('reports')}>Raporlar</button>}
         {role === 'admin' && <button className={view === 'personnel' ? 'active' : ''} onClick={() => setView('personnel')}>Personel Yönetimi</button>}
       </nav>
@@ -913,7 +1093,7 @@ export default function Home() {
         <div><h1>{viewTitle}</h1><p>{viewSubtitle}</p></div>
         <div className="topActions">
           <button className="noticeBtn" onClick={() => setShowNotices(v => !v)}>🔔 <b>{unread}</b></button>
-          {view === 'jobs' && canCreate && <button className="primary" onClick={() => setShowForm(true)}>+ Yeni İş</button>}
+          {(view === 'jobs' || view === 'calendar') && canCreate && <button className="primary" onClick={() => setShowForm(true)}>+ Yeni İş</button>}
           {view === 'personnel' && role === 'admin' && <button className="primary" onClick={() => setShowPersonnelForm(true)}>+ Personel Ekle</button>}
         </div>
       </header>
@@ -966,13 +1146,15 @@ export default function Home() {
                 <a href={`tel:${job.customer_phone}`}>{job.customer_phone}</a>
                 {job.customer_address && <div className="jobAddress">📍 {job.customer_address}</div>}
                 <p>{job.description}</p>
-                <div className="jobMeta"><small>Ekleyen: <b>{job.creator?.full_name || job.created_by_name || 'SUTEK Personeli'}</b></small><small className={job.assigned_to === currentUserId ? 'assignedMe' : ''}>Servis: <b>{job.assignee?.full_name || 'Atanmadı'}</b></small></div>
+                <div className="jobMeta"><small>Servis No: <b>{job.service_no || '-'}</b></small><small>Ekleyen: <b>{job.creator?.full_name || job.created_by_name || 'SUTEK Personeli'}</b></small><small className={job.assigned_to === currentUserId ? 'assignedMe' : ''}>Servis: <b>{job.assignee?.full_name || 'Atanmadı'}</b></small></div>
               </div>
               <div className="actions">
                 {canSchedule && <button onClick={() => setEditJob(job)}>Düzenle</button>}
                 <a className="actionLink" href={`tel:${job.customer_phone}`}>Ara</a>
                 {job.customer_address && <button onClick={() => setNavigationJob(job)}>Navigasyon</button>}
-                <button onClick={() => setHistoryPhone(job.customer_phone)}>Geçmiş</button>
+                <button onClick={() => setHistoryPhone(job.customer_phone)}>Müşteri Kartı</button>
+                <button onClick={() => setCommentsJob(job)}>Notlar ({jobComments.filter(c => c.job_id === job.id).length})</button>
+                <button onClick={() => setSignatureJob(job)}>{job.signature_path ? 'İmzayı Gör/Yenile' : 'Müşteri İmzası'}</button>
                 <button onClick={() => setFilesJob(job)}>Dosyalar ({attachments.filter(a => a.job_id === job.id).length})</button>
                 <button onClick={() => uploadJobFile(job)} disabled={fileBusy}>+ Dosya</button>
                 <button onClick={() => openReport(job)}>{serviceReports.some(r => r.job_id === job.id) ? 'Servis Formu' : 'Servis Formu Oluştur'}</button>
@@ -989,7 +1171,43 @@ export default function Home() {
               </div>
             </article>})}</div>}
         </div>
-      </> : view === 'customers' ?
+      </> : view === 'calendar' ?
+        <div className="panel calendarPanel">
+          <div className="calendarToolbar">
+            <div className="calendarNav"><button onClick={() => shiftCalendar(-1)}>‹</button><button onClick={() => setCalendarAnchor(localDateInputValue())}>Bugün</button><button onClick={() => shiftCalendar(1)}>›</button></div>
+            <h2>{calendarMode === 'month' ? new Intl.DateTimeFormat('tr-TR',{month:'long',year:'numeric'}).format(calendarAnchorDate) : `${calendarWeekDays[0].toLocaleDateString('tr-TR')} - ${calendarWeekDays[6].toLocaleDateString('tr-TR')}`}</h2>
+            <div className="calendarModes"><button className={calendarMode==='week'?'selected':''} onClick={()=>setCalendarMode('week')}>Hafta</button><button className={calendarMode==='month'?'selected':''} onClick={()=>setCalendarMode('month')}>Ay</button></div>
+          </div>
+          <div className={`calendarGrid ${calendarMode}`}>
+            {calendarMode === 'month' && ['Pzt','Sal','Çar','Per','Cum','Cmt','Paz'].map(d => <div className="calendarWeekday" key={d}>{d}</div>)}
+            {calendarDays.map(day => <div key={day.toISOString()} className={`calendarDay ${day.getMonth()!==calendarMonthIndex && calendarMode==='month'?'otherMonth':''} ${day.toDateString()===new Date().toDateString()?'today':''}`}>
+              <div className="calendarDayHead"><b>{day.getDate()}</b><span>{calendarMode==='week' ? day.toLocaleDateString('tr-TR',{weekday:'short'}) : ''}</span></div>
+              <div className="calendarJobs">{jobsForDay(day).map(job => <button key={job.id} className={`calendarJob ${job.priority==='urgent'?'urgent':''}`} onClick={() => canSchedule ? setEditJob(job) : setCommentsJob(job)}><span>{new Date(job.scheduled_at).toLocaleTimeString('tr-TR',{hour:'2-digit',minute:'2-digit'})}</span><b>{job.customer_name}</b><small>{job.assignee?.full_name || 'Atama yok'}</small></button>)}</div>
+            </div>)}
+          </div>
+        </div>
+      : view === 'dashboard' && canSeeReports ?
+        <>
+          <div className="dashboardCards">
+            <article><span>Bugünkü İş</span><strong>{dashboardTodayJobs.length}</strong><small>{dashboardTodayJobs.filter(j=>j.status==='completed').length} tamamlandı</small></article>
+            <article><span>Açık İş</span><strong>{dashboardOpen.length}</strong><small>{dashboardLate.length} geciken</small></article>
+            <article><span>Bu Ay Tamamlanan</span><strong>{dashboardCompletedMonth}</strong><small>%{dashboardCompletionRate} tamamlama</small></article>
+            <article><span>Bakım Bekleyen</span><strong>{dueMaintenance.length}</strong><small>30 gün içinde / geçmiş</small></article>
+          </div>
+          <div className="dashboardGrid">
+            <div className="panel"><div className="panelHead"><div><h2>Son 7 Gün</h2><p className="muted">Günlük iş ve tamamlanma özeti</p></div></div><div className="weekSummary">{dashboardLast7.map(x=><article key={x.d.toISOString()}><span>{x.d.toLocaleDateString('tr-TR',{weekday:'short'})}</span><strong>{x.count}</strong><small>{x.completed} tamamlandı</small></article>)}</div></div>
+            <div className="panel"><div className="panelHead"><div><h2>Servis Yükü</h2><p className="muted">Personel bazında atanan işler</p></div></div><div className="dashboardServiceList">{serviceStatusRows.map(row=><div key={row.id}><b>{row.name}</b><span>{row.pending} bekliyor · {row.inProgress} işlemde · {row.completed} tamamlandı</span></div>)}</div></div>
+          </div>
+        </>
+      : view === 'maintenance' && canSeeReports ?
+        <div className="panel maintenancePanel">
+          <div className="panelHead"><div><h2>Periyodik Bakımlar</h2><p className="muted">Tamamlanan işlerde seçilen bakım periyoduna göre otomatik hesaplanır.</p></div><span>{maintenanceJobs.length} bakım</span></div>
+          {maintenanceJobs.length===0 ? <div className="empty">Planlanmış periyodik bakım bulunmuyor.</div> : <div className="maintenanceList">{maintenanceJobs.map(job=>{
+            const overdue = new Date(job.next_maintenance_at!).getTime() < Date.now()
+            return <article key={job.id} className={overdue?'maintenanceOverdue':''}><div><b>{job.customer_name}</b><span>{job.service_no}</span><small>{job.customer_phone}</small></div><div><span>Bakım tarihi</span><strong>{new Date(job.next_maintenance_at!).toLocaleDateString('tr-TR')}</strong><small>{job.repeat_months} ayda bir</small></div><div className="maintenanceActions"><button onClick={()=>setHistoryPhone(job.customer_phone)}>Müşteri Kartı</button><button className="primary" onClick={()=>createMaintenanceJob(job)}>Bakım İşini Oluştur</button></div></article>
+          })}</div>}
+        </div>
+      : view === 'customers' ?
         <div className="panel">
           <div className="panelHead"><div><h2>Müşteriler</h2><input className="searchInput" value={customerSearch} onChange={e => setCustomerSearch(e.target.value)} placeholder="Müşteri adı veya telefon ara…" /></div><span>{customers.length} müşteri</span></div>
           {customers.length === 0 ? <div className="empty">Müşteri kaydı bulunamadı.</div> :
@@ -1000,7 +1218,7 @@ export default function Home() {
               return <article className="customerRow" key={customer.phone}>
                 <div><h3>{customer.name}</h3><a href={`tel:${customer.phone}`}>{customer.phone}</a><small>Son iş: {new Date(lastJob.scheduled_at).toLocaleString('tr-TR')}</small></div>
                 <div className="customerStats"><span><b>{customer.jobs.length}</b> Toplam</span><span><b>{completed}</b> Tamamlandı</span><span><b>{postponed}</b> Ertelendi</span></div>
-                <button onClick={() => setHistoryPhone(customer.phone)}>Geçmişi Aç</button>
+                <button onClick={() => setHistoryPhone(customer.phone)}>Müşteri Kartını Aç</button>
               </article>
             })}</div>}
         </div>
@@ -1056,6 +1274,24 @@ export default function Home() {
         </div>}
     </section>
 
+    {commentsJob && <div className="modalBackdrop" onMouseDown={() => setCommentsJob(null)}>
+      <div className="modal commentsModal" onMouseDown={e => e.stopPropagation()}>
+        <div className="modalHead"><div><h2>İş İçi Notlar</h2><p>{commentsJob.service_no} · {commentsJob.customer_name}</p></div><button onClick={() => setCommentsJob(null)}>×</button></div>
+        <div className="commentList">{jobComments.filter(c=>c.job_id===commentsJob.id).length===0 ? <div className="empty compactEmpty">Henüz not yok.</div> : jobComments.filter(c=>c.job_id===commentsJob.id).map(c=><article key={c.id} className={c.author_id===currentUserId?'myComment':''}><div><b>{c.author?.full_name || 'Personel'}</b><small>{new Date(c.created_at).toLocaleString('tr-TR')}</small></div><p>{c.message}</p>{(c.author_id===currentUserId||role==='admin')&&<button onClick={()=>deleteJobComment(c)}>Sil</button>}</article>)}</div>
+        <div className="commentComposer"><textarea rows={3} value={commentDraft} onChange={e=>setCommentDraft(e.target.value)} placeholder="Sadece SUTEK ekibinin göreceği notu yazın…"/><button className="primary" onClick={addJobComment}>Not Ekle</button></div>
+      </div>
+    </div>}
+
+    {signatureJob && <div className="modalBackdrop" onMouseDown={() => setSignatureJob(null)}>
+      <div className="modal signatureModal" onMouseDown={e => e.stopPropagation()}>
+        <div className="modalHead"><div><h2>Müşteri Onayı / İmza</h2><p>{signatureJob.service_no} · {signatureJob.customer_name}</p></div><button onClick={() => setSignatureJob(null)}>×</button></div>
+        {signatureJob.signature_path && <div className="existingSignature"><span>Bu iş için daha önce imza alındı: <b>{signatureJob.signature_name}</b></span><small>{signatureJob.signed_at ? new Date(signatureJob.signed_at).toLocaleString('tr-TR') : ''}</small></div>}
+        <p className="signatureHelp">Müşteri aşağıdaki alana parmağı veya mouse ile imza atabilir.</p>
+        <canvas ref={signatureCanvasRef} className="signatureCanvas" width={700} height={230} onPointerDown={signatureStart} onPointerMove={signatureMove} onPointerUp={signatureEnd} onPointerCancel={signatureEnd} onPointerLeave={signatureEnd}/>
+        <div className="formActions"><button onClick={clearSignature}>Temizle</button><button className="primary" onClick={saveSignature}>İmzayı Kaydet</button></div>
+      </div>
+    </div>}
+
     {navigationJob && <div className="modalBackdrop" onMouseDown={() => setNavigationJob(null)}>
       <div className="modal navigationModal" onMouseDown={e => e.stopPropagation()}>
         <div className="modalHead"><div><h2>Navigasyon Seç</h2><p>{navigationJob.customer_name}</p></div><button onClick={() => setNavigationJob(null)}>×</button></div>
@@ -1078,6 +1314,7 @@ export default function Home() {
           <label>Adres (isteğe bağlı)<input name="customer_address" defaultValue={editJob.customer_address || ''} placeholder="Servisin gideceği adres" /></label>
           <label>Yapılacak İş<textarea name="description" required rows={4} defaultValue={editJob.description} /></label>
           <div className="grid2">
+            <label>Periyodik Bakım<select name="repeat_months" defaultValue={editJob.repeat_months || ''}><option value="">Tek seferlik</option><option value="1">Her 1 ay</option><option value="3">Her 3 ay</option><option value="6">Her 6 ay</option><option value="12">Her 12 ay</option><option value="24">Her 24 ay</option></select></label>
             <label>Öncelik<select name="priority" defaultValue={editJob.priority || 'normal'}><option value="normal">Normal</option><option value="urgent">Acil</option></select></label>
             <label>Servis Personeli<select name="assigned_to" defaultValue={editJob.assigned_to || ''}><option value="">Atama yok</option>{serviceProfiles.map(p => <option key={p.id} value={p.id}>{p.full_name}</option>)}</select></label>
           </div>
@@ -1124,6 +1361,7 @@ export default function Home() {
           <span>🖼️ {attachments.filter(a => a.job_id === reportJob.id && a.mime_type?.startsWith('image/')).length} fotoğraf</span>
           <button type="button" onClick={() => setFilesJob(reportJob)}>Dosyaları Aç</button>
         </div>
+        <div className="serviceExtraActions">{reportJob.repeat_months && <span>Periyodik bakım: <b>{reportJob.repeat_months} ay</b>{reportJob.next_maintenance_at && <> · Sonraki: <b>{new Date(reportJob.next_maintenance_at).toLocaleDateString('tr-TR')}</b></>}</span>}<button type="button" onClick={() => setSignatureJob(reportJob)}>{reportJob.signature_path ? 'İmzayı Gör/Yenile' : 'Müşteri İmzası Al'}</button></div>
         <div className="formActions serviceFormActions">
           {serviceReports.some(r => r.job_id === reportJob.id) && <button type="button" onClick={() => printServiceForm({ ...reportJob, customer_report: reportDraft || reportJob.customer_report })}>PDF Oluştur</button>}
           {(reportDraft || reportJob.customer_report) && <button type="button" className="whatsappBtn" onClick={() => whatsappCustomerReport({ ...reportJob, customer_report: reportDraft || reportJob.customer_report })}>WhatsApp'ta Paylaş</button>}
@@ -1135,11 +1373,11 @@ export default function Home() {
       </div>
     </div>}
 
-    {historyPhone && <div className="modalBackdrop" onMouseDown={() => setHistoryPhone(null)}><div className="modal historyModal serviceHistoryModal" onMouseDown={e => e.stopPropagation()}><div className="modalHead"><div><h2>Müşteri Servis Geçmişi</h2><p>{historyPhone} · {historyJobs.length} kayıt</p></div><button onClick={() => setHistoryPhone(null)}>×</button></div><div className="historyList">{historyJobs.map(h => {
+    {historyPhone && <div className="modalBackdrop" onMouseDown={() => setHistoryPhone(null)}><div className="modal historyModal serviceHistoryModal" onMouseDown={e => e.stopPropagation()}><div className="modalHead"><div><h2>Müşteri Kartı</h2><p>{historyPhone} · {historyJobs.length} servis kaydı</p></div><button onClick={() => setHistoryPhone(null)}>×</button></div>{historyJobs.length>0 && <div className="customerCardSummary"><div><span>Müşteri</span><b>{historyJobs[0].customer_name}</b></div><div><span>Telefon</span><b>{historyPhone}</b></div><div><span>Adresler</span><b>{Array.from(new Set(historyJobs.map(j=>j.customer_address).filter(Boolean))).length}</b></div><div><span>Toplam Servis</span><b>{historyJobs.length}</b></div><div><span>Son Servis</span><b>{new Date(historyJobs[0].scheduled_at).toLocaleDateString('tr-TR')}</b></div><div><span>Sonraki Bakım</span><b>{historyJobs.find(j=>j.next_maintenance_at)?.next_maintenance_at ? new Date(historyJobs.find(j=>j.next_maintenance_at)!.next_maintenance_at!).toLocaleDateString('tr-TR') : '-'}</b></div></div>}<div className="historyList">{historyJobs.map(h => {
       const sr = serviceReports.find(r => r.job_id === h.id)
       const fileCount = attachments.filter(a => a.job_id === h.id).length
       return <article key={h.id} className="serviceHistoryCard">
-        <div><b>{new Date(h.scheduled_at).toLocaleString('tr-TR')}</b><span className={`badge ${h.status}`}>{statusText[h.status]}</span></div>
+        <div><b>{new Date(h.scheduled_at).toLocaleString('tr-TR')} · {h.service_no || ''}</b><span className={`badge ${h.status}`}>{statusText[h.status]}</span></div>
         <h3>{h.customer_name}</h3>
         <p><b>Talep:</b> {h.description}</p>
         {sr && <div className="historyServiceDetails">
@@ -1158,6 +1396,6 @@ export default function Home() {
 
     {showPersonnelForm && role === 'admin' && <div className="modalBackdrop" onMouseDown={() => setShowPersonnelForm(false)}><div className="modal" onMouseDown={e => e.stopPropagation()}><div className="modalHead"><div><h2>Yeni Personel Ekle</h2><p>Kullanıcı hemen giriş yapabilir.</p></div><button onClick={() => setShowPersonnelForm(false)}>×</button></div><form onSubmit={createPersonnel}><label>Ad Soyad<input name="full_name" required /></label><label>E-posta<input name="email" type="email" required /></label><label>Geçici Şifre<input name="password" type="password" minLength={6} required /></label><label>Rol<select name="role" defaultValue="office"><option value="office">Ofis</option><option value="service">Servis</option><option value="admin">Yönetici</option></select></label>{personnelMessage && <div className="authMessage">{personnelMessage}</div>}<div className="formActions"><button type="button" onClick={() => setShowPersonnelForm(false)}>Vazgeç</button><button className="primary" type="submit" disabled={personnelBusy}>{personnelBusy ? 'Oluşturuluyor…' : 'Personeli Oluştur'}</button></div></form></div></div>}
 
-    {showForm && <div className="modalBackdrop" onMouseDown={() => setShowForm(false)}><div className="modal" onMouseDown={e => e.stopPropagation()}><div className="modalHead"><div><h2>Yeni İş Ekle</h2><p>İş servis bölümüne iletilecek.</p></div><button onClick={() => setShowForm(false)}>×</button></div><form onSubmit={createJob}><div className="grid2"><label>Tarih<input name="date" type="date" required defaultValue={localDateInputValue()} /></label><label>Saat<input name="time" type="time" required /></label></div><label>Müşteri Adı<input name="customer_name" required /></label><label>Telefon<input name="customer_phone" required inputMode="tel" /></label><label>Adres (isteğe bağlı)<input name="customer_address" placeholder="Servisin gideceği adres" /></label><label>Yapılacak İş<textarea name="description" required rows={4} /></label><div className="grid2"><label>Öncelik<select name="priority" defaultValue="normal"><option value="normal">Normal</option><option value="urgent">Acil</option></select></label><label>Servis Personeli<select name="assigned_to" defaultValue=""><option value="">Atama yok</option>{serviceProfiles.map(p => <option key={p.id} value={p.id}>{p.full_name}</option>)}</select></label></div><div className="creator">Ekleyen kişi otomatik kaydedilecek: <b>{profileName}</b></div><div className="formActions"><button type="button" onClick={() => setShowForm(false)}>Vazgeç</button><button className="primary" type="submit">İşi Oluştur</button></div></form></div></div>}
+    {showForm && <div className="modalBackdrop" onMouseDown={() => setShowForm(false)}><div className="modal" onMouseDown={e => e.stopPropagation()}><div className="modalHead"><div><h2>Yeni İş Ekle</h2><p>İş servis bölümüne iletilecek.</p></div><button onClick={() => setShowForm(false)}>×</button></div><form onSubmit={createJob}><div className="grid2"><label>Tarih<input name="date" type="date" required defaultValue={localDateInputValue()} /></label><label>Saat<input name="time" type="time" required /></label></div><label>Müşteri Adı<input name="customer_name" required /></label><label>Telefon<input name="customer_phone" required inputMode="tel" /></label><label>Adres (isteğe bağlı)<input name="customer_address" placeholder="Servisin gideceği adres" /></label><label>Yapılacak İş<textarea name="description" required rows={4} /></label><div className="grid2"><label>Periyodik Bakım<select name="repeat_months" defaultValue=""><option value="">Tek seferlik</option><option value="1">Her 1 ay</option><option value="3">Her 3 ay</option><option value="6">Her 6 ay</option><option value="12">Her 12 ay</option><option value="24">Her 24 ay</option></select></label><label>Öncelik<select name="priority" defaultValue="normal"><option value="normal">Normal</option><option value="urgent">Acil</option></select></label><label>Servis Personeli<select name="assigned_to" defaultValue=""><option value="">Atama yok</option>{serviceProfiles.map(p => <option key={p.id} value={p.id}>{p.full_name}</option>)}</select></label></div><div className="creator">Ekleyen kişi otomatik kaydedilecek: <b>{profileName}</b></div><div className="formActions"><button type="button" onClick={() => setShowForm(false)}>Vazgeç</button><button className="primary" type="submit">İşi Oluştur</button></div></form></div></div>}
   </main>
 }

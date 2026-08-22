@@ -17,9 +17,12 @@ Deno.serve(async(req:Request)=>{
   const body=await req.json();
   const jobId=String(body.job_id||""),customerName=String(body.customer_name||"").trim(),customerPhone=String(body.customer_phone||"").trim(),customerAddress=String(body.customer_address||"").trim(),description=String(body.description||"").trim(),scheduledAt=String(body.scheduled_at||"");
   const priority=body.priority==="urgent"?"urgent":"normal",assignedTo=body.assigned_to?String(body.assigned_to):null;
+  const repeatMonths=body.repeat_months?Number(body.repeat_months):null;
+  const allowedRepeats=[1,2,3,4,6,12,24];
+  if(repeatMonths!==null&&!allowedRepeats.includes(repeatMonths))return json({error:"Geçersiz periyodik bakım aralığı."},400);
   if(!jobId||!customerName||!customerPhone||!description||Number.isNaN(Date.parse(scheduledAt)))return json({error:"Tarih-saat, müşteri, telefon ve yapılacak iş gerekli."},400);
   if(assignedTo){const {data:p}=await adminClient.from("profiles").select("id,role,is_active").eq("id",assignedTo).single();if(!p||p.role!=="service"||!p.is_active)return json({error:"Seçilen servis personeli geçerli değil."},400)}
-  const {error}=await adminClient.from("jobs").update({customer_name:customerName,customer_phone:customerPhone,customer_address:customerAddress||null,description,scheduled_at:scheduledAt,priority,assigned_to:assignedTo}).eq("id",jobId);
+  const {error}=await adminClient.from("jobs").update({customer_name:customerName,customer_phone:customerPhone,customer_address:customerAddress||null,description,scheduled_at:scheduledAt,priority,assigned_to:assignedTo,repeat_months:repeatMonths}).eq("id",jobId);
   if(error)throw error; return json({ok:true});
  }catch(error){return json({error:error instanceof Error?error.message:"Beklenmeyen hata"},400)}
 });
