@@ -142,12 +142,60 @@ export default function Home() {
 
   useEffect(() => {
     if (!supabase || !signedIn) return
-    const channel = supabase.channel('team-live')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'jobs' }, () => load())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'notifications' }, () => load())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'job_attachments' }, () => load())
+
+    async function refreshSingleJob(jobId: string) {
+      const { data } = await supabase
+        .from('jobs')
+        .select('*, creator:profiles!jobs_created_by_fkey(full_name), assignee:profiles!jobs_assigned_to_fkey(full_name)')
+        .eq('id', jobId)
+        .single()
+      if (!data) return
+      const nextJob = data as Job
+      setJobs(current => {
+        const exists = current.some(j => j.id === nextJob.id)
+        const next = exists
+          ? current.map(j => j.id === nextJob.id ? nextJob : j)
+          : [...current, nextJob]
+        return next.sort((a, b) => +new Date(a.scheduled_at) - +new Date(b.scheduled_at))
+      })
+    }
+
+    const channel = supabase.channel(`team-live-${crypto.randomUUID()}`)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'jobs' }, payload => {
+        const id = String((payload.new as { id?: string })?.id || '')
+        if (id) void refreshSingleJob(id)
+      })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'jobs' }, payload => {
+        const id = String((payload.new as { id?: string })?.id || '')
+        if (id) void refreshSingleJob(id)
+      })
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'jobs' }, payload => {
+        const id = String((payload.old as { id?: string })?.id || '')
+        if (id) setJobs(current => current.filter(j => j.id !== id))
+      })
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications' }, payload => {
+        const notice = payload.new as Notice & { user_id?: string }
+        void supabase.auth.getUser().then(({ data }) => {
+          if (data.user?.id && notice.user_id === data.user.id) {
+            setNotices(current => current.some(n => n.id === notice.id) ? current : [notice, ...current].slice(0, 30))
+          }
+        })
+      })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'notifications' }, payload => {
+        const notice = payload.new as Notice
+        setNotices(current => current.map(n => n.id === notice.id ? notice : n))
+      })
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'job_attachments' }, payload => {
+        const file = payload.new as Attachment
+        setAttachments(current => current.some(a => a.id === file.id) ? current : [file, ...current])
+      })
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'job_attachments' }, payload => {
+        const id = String((payload.old as { id?: string })?.id || '')
+        if (id) setAttachments(current => current.filter(a => a.id !== id))
+      })
       .subscribe()
-    return () => { supabase.removeChannel(channel) }
+
+    return () => { void supabase.removeChannel(channel) }
   }, [supabase, signedIn])
 
   async function signIn(e: FormEvent<HTMLFormElement>) {
@@ -173,11 +221,12 @@ export default function Home() {
   async function createJob(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
     if (!supabase) return
-    const fd = new FormData(e.currentTarget)
+    const form = e.currentTarget
+    const fd = new FormData(form)
     const scheduled = new Date(`${fd.get('date')}T${fd.get('time')}`)
     const { data: auth } = await supabase.auth.getUser()
     if (!auth.user) return
-    const { error } = await supabase.from('jobs').insert({
+    const { data, error } = await supabase.from('jobs').insert({
       scheduled_at: scheduled.toISOString(),
       customer_name: String(fd.get('customer_name')).trim(),
       customer_phone: String(fd.get('customer_phone')).trim(),
@@ -185,11 +234,18 @@ export default function Home() {
       priority: String(fd.get('priority') || 'normal') === 'urgent' ? 'urgent' : 'normal',
       assigned_to: String(fd.get('assigned_to') || '') || null,
       created_by: auth.user.id
-    })
+    }).select('*, creator:profiles!jobs_created_by_fkey(full_name), assignee:profiles!jobs_assigned_to_fkey(full_name)').single()
     if (error) return alert(error.message)
+
+    if (data) {
+      const newJob = data as Job
+      setJobs(current => {
+        if (current.some(j => j.id === newJob.id)) return current
+        return [...current, newJob].sort((a, b) => +new Date(a.scheduled_at) - +new Date(b.scheduled_at))
+      })
+    }
     setShowForm(false)
-    e.currentTarget.reset()
-    await load()
+    form.reset()
   }
 
   async function setStatus(job: Job, status: Status) {
@@ -197,9 +253,21 @@ export default function Home() {
     const patch: Record<string, string> = { status }
     if (status === 'completed') patch.completed_at = new Date().toISOString()
     if (status === 'postponed') patch.postponement_reason = 'Servis tarafından ertelendi; yeni tarih Ofis/Yönetici tarafından belirlenecek'
-    const { error } = await supabase.from('jobs').update(patch).eq('id', job.id)
-    if (error) return alert(error.message)
-    await load()
+
+    const previous = job
+    setJobs(current => current.map(j => j.id === job.id ? { ...j, ...patch } as Job : j))
+
+    const { data, error } = await supabase.from('jobs')
+      .update(patch)
+      .eq('id', job.id)
+      .select('*, creator:profiles!jobs_created_by_fkey(full_name), assignee:profiles!jobs_assigned_to_fkey(full_name)')
+      .single()
+
+    if (error) {
+      setJobs(current => current.map(j => j.id === job.id ? previous : j))
+      return alert(error.message)
+    }
+    if (data) setJobs(current => current.map(j => j.id === job.id ? data as Job : j))
   }
 
   async function rescheduleJob(job: Job) {
@@ -212,7 +280,10 @@ export default function Home() {
       body: { job_id: job.id, scheduled_at: parsed.toISOString() }
     })
     if (error || data?.error) return alert(data?.error || error?.message || 'Tarih güncellenemedi.')
-    await load()
+    const { data: updated } = await supabase.from('jobs')
+      .select('*, creator:profiles!jobs_created_by_fkey(full_name), assignee:profiles!jobs_assigned_to_fkey(full_name)')
+      .eq('id', job.id).single()
+    if (updated) setJobs(current => current.map(j => j.id === job.id ? updated as Job : j))
   }
 
   async function saveJobEdit(e: FormEvent<HTMLFormElement>) {
@@ -232,8 +303,15 @@ export default function Home() {
       }
     })
     if (error || data?.error) return alert(data?.error || error?.message || 'İş düzenlenemedi.')
+    const editedId = editJob.id
     setEditJob(null)
-    await load()
+    const { data: updated } = await supabase.from('jobs')
+      .select('*, creator:profiles!jobs_created_by_fkey(full_name), assignee:profiles!jobs_assigned_to_fkey(full_name)')
+      .eq('id', editedId).single()
+    if (updated) {
+      setJobs(current => current.map(j => j.id === editedId ? updated as Job : j)
+        .sort((a, b) => +new Date(a.scheduled_at) - +new Date(b.scheduled_at)))
+    }
   }
 
   function localDateForJob(value: string) {
@@ -277,7 +355,10 @@ export default function Home() {
           await supabase.storage.from('job-files').remove([path])
           return alert('Dosya kaydı oluşturulamadı: ' + rowError.message)
         }
-        await load()
+        const { data: createdFile } = await supabase.from('job_attachments')
+          .select('id,job_id,file_name,storage_path,mime_type,file_size,created_at')
+          .eq('storage_path', path).single()
+        if (createdFile) setAttachments(current => current.some(a => a.id === createdFile.id) ? current : [createdFile as Attachment, ...current])
         setFilesJob(job)
       } finally {
         setFileBusy(false)
@@ -300,7 +381,7 @@ export default function Home() {
     if (storageError) return alert('Dosya silinemedi: ' + storageError.message)
     const { error } = await supabase.from('job_attachments').delete().eq('id', file.id)
     if (error) return alert('Dosya kaydı silinemedi: ' + error.message)
-    await load()
+    setAttachments(current => current.filter(a => a.id !== file.id))
   }
 
   function openReport(job: Job) {
@@ -322,7 +403,8 @@ export default function Home() {
     }).eq('id', reportJob.id)
     setReportBusy(false)
     if (error) return alert('Rapor kaydedilemedi: ' + error.message)
-    await load()
+    const updatedAt = new Date().toISOString()
+    setJobs(current => current.map(j => j.id === reportJob.id ? { ...j, customer_report: report, report_updated_at: updatedAt } : j))
     setReportJob(null)
   }
 
@@ -344,7 +426,8 @@ export default function Home() {
     })
     if (error || data?.error) return alert(data?.error || error?.message || 'İş silinemedi.')
     if (historyPhone === job.customer_phone) setHistoryPhone(null)
-    await load()
+    setJobs(current => current.filter(j => j.id !== job.id))
+    setAttachments(current => current.filter(a => a.job_id !== job.id))
   }
 
   function inReportRange(value: string) {
