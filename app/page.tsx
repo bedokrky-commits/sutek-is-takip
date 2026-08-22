@@ -35,6 +35,17 @@ type Attachment = {
 type Notice = { id: string; title?: string; message: string; created_at: string; is_read: boolean; job_id?: string | null }
 type Profile = { id: string; full_name: string; email?: string | null; role: Role; is_active: boolean; phone?: string | null }
 type JobHistory = { id: string; job_id: string; new_status: Status; created_at: string; changed_by?: string | null; changer?: { full_name?: string; role?: Role } | null }
+type ServiceReport = {
+  id: string
+  job_id: string
+  work_performed: string
+  parts_used?: string | null
+  internal_note?: string | null
+  created_by?: string | null
+  updated_by?: string | null
+  created_at: string
+  updated_at: string
+}
 
 const statusText: Record<Status, string> = {
   pending: 'Bekliyor',
@@ -58,10 +69,15 @@ export default function Home() {
   const [notices, setNotices] = useState<Notice[]>([])
   const [profiles, setProfiles] = useState<Profile[]>([])
   const [jobHistory, setJobHistory] = useState<JobHistory[]>([])
+  const [serviceReports, setServiceReports] = useState<ServiceReport[]>([])
   const [attachments, setAttachments] = useState<Attachment[]>([])
   const [filesJob, setFilesJob] = useState<Job | null>(null)
   const [reportJob, setReportJob] = useState<Job | null>(null)
   const [reportDraft, setReportDraft] = useState('')
+  const [workPerformedDraft, setWorkPerformedDraft] = useState('')
+  const [partsUsedDraft, setPartsUsedDraft] = useState('')
+  const [internalNoteDraft, setInternalNoteDraft] = useState('')
+  const [completeAfterReport, setCompleteAfterReport] = useState(false)
   const [fileBusy, setFileBusy] = useState(false)
   const [reportBusy, setReportBusy] = useState(false)
   const [serviceProfiles, setServiceProfiles] = useState<Profile[]>([])
@@ -109,15 +125,17 @@ export default function Home() {
       setRole(profile.role as Role)
     }
 
-    const [{ data: js }, { data: ns }, { data: hs }, { data: at }] = await Promise.all([
+    const [{ data: js }, { data: ns }, { data: hs }, { data: sr }, { data: at }] = await Promise.all([
       supabase.from('jobs').select('*, creator:profiles!jobs_created_by_fkey(full_name), assignee:profiles!jobs_assigned_to_fkey(full_name)').order('scheduled_at', { ascending: true }),
       supabase.from('notifications').select('*').eq('user_id', user.id).order('created_at', { ascending: false }).limit(30),
       supabase.from('job_status_history').select('id,job_id,new_status,created_at,changed_by,changer:profiles!job_status_history_changed_by_fkey(full_name,role)').order('created_at', { ascending: true }),
+      supabase.from('service_reports').select('id,job_id,work_performed,parts_used,internal_note,created_by,updated_by,created_at,updated_at').order('updated_at', { ascending: false }),
       supabase.from('job_attachments').select('id,job_id,file_name,storage_path,mime_type,file_size,created_at').order('created_at', { ascending: false })
     ])
     setJobs((js ?? []) as Job[])
     setNotices((ns ?? []) as Notice[])
     setJobHistory((hs ?? []) as JobHistory[])
+    setServiceReports((sr ?? []) as ServiceReport[])
     setAttachments((at ?? []) as Attachment[])
 
     if (profile?.role === 'admin') {
@@ -188,6 +206,18 @@ export default function Home() {
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'notifications' }, payload => {
         const notice = payload.new as Notice
         setNotices(current => current.map(n => n.id === notice.id ? notice : n))
+      })
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'service_reports' }, payload => {
+        const report = payload.new as ServiceReport
+        setServiceReports(current => current.some(r => r.id === report.id) ? current : [report, ...current])
+      })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'service_reports' }, payload => {
+        const report = payload.new as ServiceReport
+        setServiceReports(current => current.some(r => r.id === report.id) ? current.map(r => r.id === report.id ? report : r) : [report, ...current])
+      })
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'service_reports' }, payload => {
+        const id = String((payload.old as { id?: string })?.id || '')
+        if (id) setServiceReports(current => current.filter(r => r.id !== id))
       })
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'job_attachments' }, payload => {
         const file = payload.new as Attachment
@@ -411,28 +441,154 @@ export default function Home() {
     setAttachments(current => current.filter(a => a.id !== file.id))
   }
 
-  function openReport(job: Job) {
+  function openReport(job: Job, completeAfter = false) {
+    const serviceReport = serviceReports.find(r => r.job_id === job.id)
     setReportJob(job)
     setReportDraft(job.customer_report || '')
+    setWorkPerformedDraft(serviceReport?.work_performed || '')
+    setPartsUsedDraft(serviceReport?.parts_used || '')
+    setInternalNoteDraft(serviceReport?.internal_note || '')
+    setCompleteAfterReport(completeAfter)
   }
 
-  async function saveCustomerReport() {
+  async function saveServiceForm(completeAfter = false) {
     if (!supabase || !reportJob || !['service', 'admin'].includes(role)) return
-    const report = reportDraft.trim()
-    if (!report) return alert('Müşteri raporu boş olamaz.')
+
+    const workPerformed = workPerformedDraft.trim()
+    const customerReport = reportDraft.trim()
+    if (!workPerformed) return alert('Yapılan işlem alanı boş olamaz.')
+    if (!customerReport) return alert('Müşteriye gönderilecek rapor boş olamaz.')
+
     setReportBusy(true)
     const { data: auth } = await supabase.auth.getUser()
     if (!auth.user) { setReportBusy(false); return }
-    const { error } = await supabase.from('jobs').update({
-      customer_report: report,
+
+    const existing = serviceReports.find(r => r.job_id === reportJob.id)
+    const reportPayload = {
+      job_id: reportJob.id,
+      work_performed: workPerformed,
+      parts_used: partsUsedDraft.trim() || null,
+      internal_note: internalNoteDraft.trim() || null,
+      updated_by: auth.user.id,
+      ...(existing ? {} : { created_by: auth.user.id })
+    }
+
+    const { data: savedReport, error: reportError } = await supabase
+      .from('service_reports')
+      .upsert(reportPayload, { onConflict: 'job_id' })
+      .select('id,job_id,work_performed,parts_used,internal_note,created_by,updated_by,created_at,updated_at')
+      .single()
+
+    if (reportError) {
+      setReportBusy(false)
+      return alert('Servis formu kaydedilemedi: ' + reportError.message)
+    }
+
+    const jobPatch: Record<string, string> = {
+      customer_report: customerReport,
       report_updated_at: new Date().toISOString(),
       report_updated_by: auth.user.id
-    }).eq('id', reportJob.id)
+    }
+    if (completeAfter) {
+      jobPatch.status = 'completed'
+      jobPatch.completed_at = new Date().toISOString()
+    }
+
+    const { data: updatedJob, error: jobError } = await supabase
+      .from('jobs')
+      .update(jobPatch)
+      .eq('id', reportJob.id)
+      .select('*, creator:profiles!jobs_created_by_fkey(full_name), assignee:profiles!jobs_assigned_to_fkey(full_name)')
+      .single()
+
     setReportBusy(false)
-    if (error) return alert('Rapor kaydedilemedi: ' + error.message)
-    const updatedAt = new Date().toISOString()
-    setJobs(current => current.map(j => j.id === reportJob.id ? { ...j, customer_report: report, report_updated_at: updatedAt } : j))
+    if (jobError) return alert('İş güncellenemedi: ' + jobError.message)
+
+    if (savedReport) {
+      const sr = savedReport as ServiceReport
+      setServiceReports(current => current.some(r => r.id === sr.id)
+        ? current.map(r => r.id === sr.id ? sr : r)
+        : [sr, ...current])
+    }
+    if (updatedJob) {
+      setJobs(current => current.map(j => j.id === reportJob.id ? updatedJob as Job : j))
+    }
     setReportJob(null)
+    setCompleteAfterReport(false)
+  }
+
+  function completeJob(job: Job) {
+    const hasForm = serviceReports.some(r => r.job_id === job.id)
+    if (!hasForm || !(job.customer_report || '').trim()) {
+      openReport(job, true)
+      return
+    }
+    void setStatus(job, 'completed')
+  }
+
+  function escapeServiceHtml(value?: string | null) {
+    return String(value || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/\n/g, '<br>')
+  }
+
+  async function printServiceForm(job: Job) {
+    if (!supabase) return
+    const serviceReport = serviceReports.find(r => r.job_id === job.id)
+    if (!serviceReport) return alert('Bu iş için henüz servis formu oluşturulmamış.')
+
+    const popup = window.open('', '_blank', 'width=1000,height=850')
+    if (!popup) return alert('PDF penceresi açılamadı. Tarayıcı açılır pencere iznini kontrol edin.')
+
+    popup.document.write('<html><body style="font-family:Arial,sans-serif;padding:30px">Servis formu hazırlanıyor…</body></html>')
+
+    const imageFiles = attachments.filter(a => a.job_id === job.id && a.mime_type?.startsWith('image/'))
+    const imageUrls = await Promise.all(imageFiles.map(async file => {
+      const { data } = await supabase.storage.from('job-files').createSignedUrl(file.storage_path, 60 * 10)
+      return data?.signedUrl ? { name: file.file_name, url: data.signedUrl } : null
+    }))
+    const validImages = imageUrls.filter((item): item is { name: string; url: string } => Boolean(item))
+
+    const photosHtml = validImages.length
+      ? `<section><h2>Servis Fotoğrafları</h2><div class="photos">${validImages.map(img => `<figure><img src="${img.url}" alt=""><figcaption>${escapeServiceHtml(img.name)}</figcaption></figure>`).join('')}</div></section>`
+      : ''
+
+    const logoUrl = `${window.location.origin}/sutek-logo.png`
+    const formNo = job.id.slice(0, 8).toUpperCase()
+
+    popup.document.open()
+    popup.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>SUTEK Servis Formu ${formNo}</title><style>
+      *{box-sizing:border-box}body{font-family:Arial,sans-serif;color:#172033;margin:0;padding:28px;background:#fff}
+      .header{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #172033;padding-bottom:18px}
+      .header img{width:145px;height:auto}.headerText{text-align:right}.headerText h1{margin:0;font-size:23px}.headerText p{margin:6px 0 0;color:#5f6877;font-size:12px}
+      .meta{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin:20px 0}.meta div{border:1px solid #dde2e8;border-radius:8px;padding:10px}.meta span{display:block;color:#6b7280;font-size:10px;text-transform:uppercase;margin-bottom:4px}.meta b{font-size:13px}
+      h2{font-size:15px;margin:22px 0 8px;border-bottom:1px solid #e3e6ea;padding-bottom:7px}.box{border:1px solid #dde2e8;border-radius:8px;padding:12px;min-height:52px;font-size:12px;line-height:1.5}
+      .photos{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}.photos figure{margin:0;border:1px solid #dde2e8;border-radius:8px;overflow:hidden}.photos img{display:block;width:100%;max-height:300px;object-fit:contain;background:#f5f6f8}.photos figcaption{font-size:10px;color:#6b7280;padding:7px}
+      .footer{margin-top:28px;border-top:1px solid #dfe3e8;padding-top:12px;font-size:10px;color:#6b7280;display:flex;justify-content:space-between}
+      .actions{margin:18px 0}.actions button{padding:10px 16px;border:1px solid #172033;background:#172033;color:#fff;border-radius:7px}
+      @media print{body{padding:0}.actions{display:none}.photos img{max-height:240px}}
+    </style></head><body>
+      <div class="header"><img src="${logoUrl}" alt="SUTEK"><div class="headerText"><h1>DİJİTAL SERVİS FORMU</h1><p>Form No: ${formNo}<br>${new Date().toLocaleString('tr-TR')}</p></div></div>
+      <div class="meta">
+        <div><span>Müşteri</span><b>${escapeServiceHtml(job.customer_name)}</b></div>
+        <div><span>Telefon</span><b>${escapeServiceHtml(job.customer_phone)}</b></div>
+        <div><span>Adres</span><b>${escapeServiceHtml(job.customer_address || '-')}</b></div>
+        <div><span>Servis Tarihi</span><b>${new Date(job.scheduled_at).toLocaleString('tr-TR')}</b></div>
+        <div><span>Servis Personeli</span><b>${escapeServiceHtml(job.assignee?.full_name || 'Atanmadı')}</b></div>
+        <div><span>İş Durumu</span><b>${escapeServiceHtml(statusText[job.status])}</b></div>
+      </div>
+      <h2>Talep / Yapılacak İş</h2><div class="box">${escapeServiceHtml(job.description)}</div>
+      <h2>Yapılan İşlem</h2><div class="box">${escapeServiceHtml(serviceReport.work_performed)}</div>
+      <h2>Kullanılan / Değiştirilen Parçalar</h2><div class="box">${escapeServiceHtml(serviceReport.parts_used || 'Parça kullanılmadı / belirtilmedi.')}</div>
+      <h2>Müşteriye Sunulan Servis Raporu</h2><div class="box">${escapeServiceHtml(job.customer_report || '')}</div>
+      ${photosHtml}
+      <div class="footer"><span>SUTEK</span><span>Bu form elektronik ortamda oluşturulmuştur.</span></div>
+      <div class="actions"><button onclick="window.print()">PDF / Yazdır</button></div>
+      <script>setTimeout(()=>window.print(),700)</script>
+    </body></html>`)
+    popup.document.close()
   }
 
   function openNavigation(provider: 'google' | 'apple' | 'yandex', address?: string | null) {
@@ -505,7 +661,7 @@ export default function Home() {
       ...reportCreatorReports.map(r => [r.name, String(r.total), String(r.completed), String(r.postponed), String(r.pending)]),
       [],
       ['Servis Personeli', 'Tamamladı', 'Erteledi', 'Toplam İşlem'],
-      ...serviceReports.map(r => [r.name, String(r.completed), String(r.postponed), String(r.completed + r.postponed)]),
+      ...servicePerformanceReports.map(r => [r.name, String(r.completed), String(r.postponed), String(r.completed + r.postponed)]),
       [],
       ['İş Listesi'],
       ['Tarih', 'Müşteri', 'Telefon', 'İş', 'Durum', 'Ekleyen'],
@@ -534,7 +690,7 @@ export default function Home() {
     const popup = window.open('', '_blank', 'width=1000,height=800')
     if (!popup) return alert('PDF penceresi açılamadı. Tarayıcı açılır pencere iznini kontrol edin.')
     const creatorRows = reportCreatorReports.map(r => `<tr><td>${r.name}</td><td>${r.total}</td><td>${r.completed}</td><td>${r.postponed}</td><td>${r.pending}</td></tr>`).join('')
-    const serviceRows = serviceReports.map(r => `<tr><td>${r.name}</td><td>${r.completed}</td><td>${r.postponed}</td><td>${r.completed + r.postponed}</td></tr>`).join('')
+    const serviceRows = servicePerformanceReports.map(r => `<tr><td>${r.name}</td><td>${r.completed}</td><td>${r.postponed}</td><td>${r.completed + r.postponed}</td></tr>`).join('')
     const jobRows = reportJobs.map(j => `<tr><td>${new Date(j.scheduled_at).toLocaleString('tr-TR')}</td><td>${j.customer_name}</td><td>${j.customer_phone}</td><td>${j.description}</td><td>${statusText[j.status]}</td><td>${j.creator?.full_name || j.created_by_name || 'Bilinmeyen'}</td></tr>`).join('')
     popup.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>SUTEK Rapor</title><style>
       body{font-family:Arial,sans-serif;color:#111;padding:28px}h1{margin:0}small{color:#666}
@@ -726,7 +882,7 @@ export default function Home() {
     if (h.new_status === 'postponed') current.postponed += 1
     serviceReportMap.set(name, current)
   }
-  const serviceReports = Array.from(serviceReportMap.values()).sort((a,b) => (b.completed + b.postponed) - (a.completed + a.postponed))
+  const servicePerformanceReports = Array.from(serviceReportMap.values()).sort((a,b) => (b.completed + b.postponed) - (a.completed + a.postponed))
 
   const viewTitle =
     view === 'personnel' ? 'Personel Yönetimi' :
@@ -819,11 +975,12 @@ export default function Home() {
                 <button onClick={() => setHistoryPhone(job.customer_phone)}>Geçmiş</button>
                 <button onClick={() => setFilesJob(job)}>Dosyalar ({attachments.filter(a => a.job_id === job.id).length})</button>
                 <button onClick={() => uploadJobFile(job)} disabled={fileBusy}>+ Dosya</button>
-                <button onClick={() => openReport(job)}>{job.customer_report ? 'Raporu Aç' : 'Rapor Yaz'}</button>
+                <button onClick={() => openReport(job)}>{serviceReports.some(r => r.job_id === job.id) ? 'Servis Formu' : 'Servis Formu Oluştur'}</button>
+                {serviceReports.some(r => r.job_id === job.id) && <button onClick={() => printServiceForm(job)}>PDF</button>}
                 {job.customer_report && <button className="whatsappBtn" onClick={() => whatsappCustomerReport(job)}>WhatsApp</button>}
                 {canOperate && job.status !== 'completed' && <>
                   {job.status !== 'in_progress' && <button onClick={() => setStatus(job, 'in_progress')}>İşleme Al</button>}
-                  <button className="success" onClick={() => setStatus(job, 'completed')}>✓ Tamamlandı</button>
+                  <button className="success" onClick={() => completeJob(job)}>✓ Tamamlandı</button>
                   {job.status !== 'postponed' && <button className="warning" onClick={() => setStatus(job, 'postponed')}>↻ Ertele</button>}
                 </>}
                 {canSchedule && job.status === 'postponed' && <button className="primary" onClick={() => rescheduleJob(job)}>📅 Tarih Belirle</button>}
@@ -876,11 +1033,11 @@ export default function Home() {
               </div>}
           </div>
           <div className="panel serviceReportPanel">
-            <div className="panelHead"><div><h2>Servis Personeli Performansı</h2><p className="muted reportIntro">Servis kullanıcısının yaptığı gerçek durum değişikliklerinden hesaplanır.</p></div><span>{serviceReports.length} servis</span></div>
-            {serviceReports.length === 0 ? <div className="empty">Bu tarih aralığında servis işlemi bulunmuyor.</div> :
+            <div className="panelHead"><div><h2>Servis Personeli Performansı</h2><p className="muted reportIntro">Servis kullanıcısının yaptığı gerçek durum değişikliklerinden hesaplanır.</p></div><span>{servicePerformanceReports.length} servis</span></div>
+            {servicePerformanceReports.length === 0 ? <div className="empty">Bu tarih aralığında servis işlemi bulunmuyor.</div> :
               <div className="reportTable">
                 <div className="serviceReportRow reportHead"><span>Servis Personeli</span><span>Tamamladı</span><span>Erteledi</span><span>Toplam İşlem</span></div>
-                {serviceReports.map(r => <div className="serviceReportRow" key={r.name}><b>{r.name}</b><span>{r.completed}</span><span>{r.postponed}</span><span>{r.completed + r.postponed}</span></div>)}
+                {servicePerformanceReports.map(r => <div className="serviceReportRow" key={r.name}><b>{r.name}</b><span>{r.completed}</span><span>{r.postponed}</span><span>{r.completed + r.postponed}</span></div>)}
               </div>}
           </div>
         </>
@@ -944,22 +1101,60 @@ export default function Home() {
       </div>
     </div>}
 
-    {reportJob && <div className="modalBackdrop" onMouseDown={() => setReportJob(null)}>
-      <div className="modal reportModal" onMouseDown={e => e.stopPropagation()}>
-        <div className="modalHead"><div><h2>Müşteri Raporu</h2><p>{reportJob.customer_name} · {reportJob.customer_phone}</p></div><button onClick={() => setReportJob(null)}>×</button></div>
-        <label className="reportLabel">Müşteriye gönderilecek rapor
-          <textarea rows={9} value={reportDraft} onChange={e => setReportDraft(e.target.value)} readOnly={!['service','admin'].includes(role)} placeholder="Servis yapılan işlemi ve sonucu müşterinin anlayacağı şekilde yazsın…" />
-        </label>
-        <div className="reportHelp">WhatsApp üzerinden yalnızca bu alana yazılan rapor paylaşılır.</div>
-        <div className="formActions">
-          {reportJob.customer_report && <button type="button" className="whatsappBtn" onClick={() => whatsappCustomerReport({ ...reportJob, customer_report: reportDraft || reportJob.customer_report })}>WhatsApp'ta Paylaş</button>}
-          <button type="button" onClick={() => setReportJob(null)}>Kapat</button>
-          {['service','admin'].includes(role) && <button className="primary" type="button" disabled={reportBusy} onClick={saveCustomerReport}>{reportBusy ? 'Kaydediliyor…' : 'Raporu Kaydet'}</button>}
+    {reportJob && <div className="modalBackdrop" onMouseDown={() => { setReportJob(null); setCompleteAfterReport(false) }}>
+      <div className="modal serviceFormModal" onMouseDown={e => e.stopPropagation()}>
+        <div className="modalHead"><div><h2>Dijital Servis Formu</h2><p>{reportJob.customer_name} · {reportJob.customer_phone}</p></div><button onClick={() => { setReportJob(null); setCompleteAfterReport(false) }}>×</button></div>
+        <div className="serviceFormGrid">
+          <label>Yapılan İşlem
+            <textarea rows={5} value={workPerformedDraft} onChange={e => setWorkPerformedDraft(e.target.value)} readOnly={!['service','admin'].includes(role)} placeholder="Serviste yapılan işlemleri yazın…" />
+          </label>
+          <label>Kullanılan / Değiştirilen Parçalar
+            <textarea rows={3} value={partsUsedDraft} onChange={e => setPartsUsedDraft(e.target.value)} readOnly={!['service','admin'].includes(role)} placeholder="Örn. mekanik salmastra, rulman, filtre… Parça yoksa boş bırakılabilir." />
+          </label>
+          <label>Müşteriye Gönderilecek Rapor
+            <textarea rows={5} value={reportDraft} onChange={e => setReportDraft(e.target.value)} readOnly={!['service','admin'].includes(role)} placeholder="Müşterinin anlayacağı servis sonucu…" />
+          </label>
+          <label className="internalNoteLabel">Şirket İçi Servis Notu
+            <textarea rows={4} value={internalNoteDraft} onChange={e => setInternalNoteDraft(e.target.value)} readOnly={!['service','admin'].includes(role)} placeholder="Sadece SUTEK personelinin göreceği not…" />
+            <small>Bu alan PDF ve WhatsApp müşteri raporunda gösterilmez.</small>
+          </label>
+        </div>
+        <div className="serviceFormFileInfo">
+          <span>📎 {attachments.filter(a => a.job_id === reportJob.id).length} dosya</span>
+          <span>🖼️ {attachments.filter(a => a.job_id === reportJob.id && a.mime_type?.startsWith('image/')).length} fotoğraf</span>
+          <button type="button" onClick={() => setFilesJob(reportJob)}>Dosyaları Aç</button>
+        </div>
+        <div className="formActions serviceFormActions">
+          {serviceReports.some(r => r.job_id === reportJob.id) && <button type="button" onClick={() => printServiceForm({ ...reportJob, customer_report: reportDraft || reportJob.customer_report })}>PDF Oluştur</button>}
+          {(reportDraft || reportJob.customer_report) && <button type="button" className="whatsappBtn" onClick={() => whatsappCustomerReport({ ...reportJob, customer_report: reportDraft || reportJob.customer_report })}>WhatsApp'ta Paylaş</button>}
+          <button type="button" onClick={() => { setReportJob(null); setCompleteAfterReport(false) }}>Kapat</button>
+          {['service','admin'].includes(role) && <button className="primary" type="button" disabled={reportBusy} onClick={() => saveServiceForm(completeAfterReport)}>
+            {reportBusy ? 'Kaydediliyor…' : completeAfterReport ? 'Kaydet ve Tamamla' : 'Servis Formunu Kaydet'}
+          </button>}
         </div>
       </div>
     </div>}
 
-    {historyPhone && <div className="modalBackdrop" onMouseDown={() => setHistoryPhone(null)}><div className="modal historyModal" onMouseDown={e => e.stopPropagation()}><div className="modalHead"><div><h2>Müşteri Geçmişi</h2><p>{historyPhone} · {historyJobs.length} kayıt</p></div><button onClick={() => setHistoryPhone(null)}>×</button></div><div className="historyList">{historyJobs.map(h => <article key={h.id}><div><b>{new Date(h.scheduled_at).toLocaleString('tr-TR')}</b><span className={`badge ${h.status}`}>{statusText[h.status]}</span></div><h3>{h.customer_name}</h3><p>{h.description}</p></article>)}</div></div></div>}
+    {historyPhone && <div className="modalBackdrop" onMouseDown={() => setHistoryPhone(null)}><div className="modal historyModal serviceHistoryModal" onMouseDown={e => e.stopPropagation()}><div className="modalHead"><div><h2>Müşteri Servis Geçmişi</h2><p>{historyPhone} · {historyJobs.length} kayıt</p></div><button onClick={() => setHistoryPhone(null)}>×</button></div><div className="historyList">{historyJobs.map(h => {
+      const sr = serviceReports.find(r => r.job_id === h.id)
+      const fileCount = attachments.filter(a => a.job_id === h.id).length
+      return <article key={h.id} className="serviceHistoryCard">
+        <div><b>{new Date(h.scheduled_at).toLocaleString('tr-TR')}</b><span className={`badge ${h.status}`}>{statusText[h.status]}</span></div>
+        <h3>{h.customer_name}</h3>
+        <p><b>Talep:</b> {h.description}</p>
+        {sr && <div className="historyServiceDetails">
+          <p><b>Yapılan işlem:</b> {sr.work_performed}</p>
+          {sr.parts_used && <p><b>Parça:</b> {sr.parts_used}</p>}
+          {h.customer_report && <p><b>Müşteri raporu:</b> {h.customer_report}</p>}
+          {sr.internal_note && <p className="internalHistoryNote"><b>İç not:</b> {sr.internal_note}</p>}
+        </div>}
+        <div className="historyActions">
+          {sr && <button onClick={() => openReport(h)}>Servis Formunu Aç</button>}
+          {sr && <button onClick={() => printServiceForm(h)}>PDF</button>}
+          {fileCount > 0 && <button onClick={() => setFilesJob(h)}>Dosyalar ({fileCount})</button>}
+        </div>
+      </article>
+    })}</div></div></div>}
 
     {showPersonnelForm && role === 'admin' && <div className="modalBackdrop" onMouseDown={() => setShowPersonnelForm(false)}><div className="modal" onMouseDown={e => e.stopPropagation()}><div className="modalHead"><div><h2>Yeni Personel Ekle</h2><p>Kullanıcı hemen giriş yapabilir.</p></div><button onClick={() => setShowPersonnelForm(false)}>×</button></div><form onSubmit={createPersonnel}><label>Ad Soyad<input name="full_name" required /></label><label>E-posta<input name="email" type="email" required /></label><label>Geçici Şifre<input name="password" type="password" minLength={6} required /></label><label>Rol<select name="role" defaultValue="office"><option value="office">Ofis</option><option value="service">Servis</option><option value="admin">Yönetici</option></select></label>{personnelMessage && <div className="authMessage">{personnelMessage}</div>}<div className="formActions"><button type="button" onClick={() => setShowPersonnelForm(false)}>Vazgeç</button><button className="primary" type="submit" disabled={personnelBusy}>{personnelBusy ? 'Oluşturuluyor…' : 'Personeli Oluştur'}</button></div></form></div></div>}
 
