@@ -11,6 +11,7 @@ type Job = {
   scheduled_at: string
   customer_name: string
   customer_phone: string
+  customer_address?: string | null
   description: string
   status: Status
   created_by?: string
@@ -67,6 +68,7 @@ export default function Home() {
   const [editJob, setEditJob] = useState<Job | null>(null)
   const [jobQuickFilter, setJobQuickFilter] = useState<'all' | 'urgent' | 'late' | 'upcoming'>('all')
   const [signedIn, setSignedIn] = useState(!configured)
+  const [currentUserId, setCurrentUserId] = useState('')
   const [loading, setLoading] = useState(true)
   const [authBusy, setAuthBusy] = useState(false)
   const [authMessage, setAuthMessage] = useState('')
@@ -90,6 +92,7 @@ export default function Home() {
     const { data: auth } = await supabase.auth.getUser()
     const user = auth.user
     setSignedIn(Boolean(user))
+    setCurrentUserId(user?.id || '')
     if (!user) { setLoading(false); return }
 
     const { data: profile } = await supabase.from('profiles').select('full_name,role,is_active').eq('id', user.id).single()
@@ -251,6 +254,7 @@ export default function Home() {
       scheduled_at: scheduled.toISOString(),
       customer_name: String(fd.get('customer_name')).trim(),
       customer_phone: String(fd.get('customer_phone')).trim(),
+      customer_address: String(fd.get('customer_address') || '').trim() || null,
       description: String(fd.get('description')).trim(),
       priority: String(fd.get('priority') || 'normal') === 'urgent' ? 'urgent' : 'normal',
       assigned_to: String(fd.get('assigned_to') || '') || null,
@@ -317,6 +321,7 @@ export default function Home() {
         job_id: editJob.id,
         customer_name: String(fd.get('customer_name')).trim(),
         customer_phone: String(fd.get('customer_phone')).trim(),
+        customer_address: String(fd.get('customer_address') || '').trim(),
         description: String(fd.get('description')).trim(),
         scheduled_at: scheduled.toISOString(),
         priority: String(fd.get('priority') || 'normal'),
@@ -427,6 +432,12 @@ export default function Home() {
     const updatedAt = new Date().toISOString()
     setJobs(current => current.map(j => j.id === reportJob.id ? { ...j, customer_report: report, report_updated_at: updatedAt } : j))
     setReportJob(null)
+  }
+
+  function openMap(address?: string | null) {
+    const value = (address || '').trim()
+    if (!value) return alert('Bu iş için adres girilmemiş.')
+    window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(value)}`, '_blank', 'noopener,noreferrer')
   }
 
   function whatsappCustomerReport(job: Job) {
@@ -629,6 +640,42 @@ export default function Home() {
     }
     return true
   })
+  const serviceOrderScore = (job: Job) => {
+    const now = Date.now()
+    const when = new Date(job.scheduled_at).getTime()
+    const sameDay = new Date(job.scheduled_at).toDateString() === new Date().toDateString()
+    const diff = when - now
+    let score = 0
+    if (job.assigned_to === currentUserId) score -= 1000
+    else if (!job.assigned_to) score -= 200
+    else score += 300
+    if (job.priority === 'urgent' && job.status !== 'completed') score -= 500
+    if (job.status !== 'completed' && when < now) score -= 400
+    if (job.status !== 'completed' && sameDay) score -= 250
+    if (job.status !== 'completed' && diff >= 0 && diff <= 2 * 60 * 60 * 1000) score -= 150
+    return score + when / 1e10
+  }
+  const displayJobs = role === 'service'
+    ? [...searched].sort((a, b) => serviceOrderScore(a) - serviceOrderScore(b))
+    : searched
+
+  const myAssignedOpen = jobs.filter(j => j.assigned_to === currentUserId && j.status !== 'completed')
+  const myAssignedUrgent = myAssignedOpen.filter(j => j.priority === 'urgent').length
+  const myAssignedLate = myAssignedOpen.filter(j => new Date(j.scheduled_at).getTime() < Date.now()).length
+  const myAssignedToday = myAssignedOpen.filter(j => new Date(j.scheduled_at).toDateString() === new Date().toDateString()).length
+
+  const serviceStatusRows = serviceProfiles.map(person => {
+    const assigned = jobs.filter(j => j.assigned_to === person.id)
+    return {
+      id: person.id,
+      name: person.full_name,
+      pending: assigned.filter(j => j.status === 'pending').length,
+      inProgress: assigned.filter(j => j.status === 'in_progress').length,
+      completed: assigned.filter(j => j.status === 'completed').length,
+      postponed: assigned.filter(j => j.status === 'postponed').length
+    }
+  })
+
   const historyJobs = historyPhone ? jobs.filter(j => j.customer_phone === historyPhone).sort((a,b) => +new Date(b.scheduled_at) - +new Date(a.scheduled_at)) : []
   const canCreate = role === 'office' || role === 'admin'
   const canOperate = role === 'service' || role === 'admin'
@@ -713,6 +760,24 @@ export default function Home() {
       </div>}
 
       {view === 'jobs' ? <>
+        {role === 'service' && <div className="serviceOpsSummary">
+          <div className="serviceOpsTitle"><div><h2>Servis Operasyon</h2><p>Kendinize atanmış işler listede otomatik olarak en üste gelir.</p></div><span>{myAssignedOpen.length} açık görev</span></div>
+          <div className="serviceOpsCards">
+            <article><span>Bana Atanan</span><strong>{myAssignedOpen.length}</strong></article>
+            <article><span>Acil</span><strong>{myAssignedUrgent}</strong></article>
+            <article><span>Geciken</span><strong>{myAssignedLate}</strong></article>
+            <article><span>Bugün</span><strong>{myAssignedToday}</strong></article>
+          </div>
+        </div>}
+        {(role === 'admin' || role === 'office') && serviceStatusRows.length > 0 && <div className="serviceStatusPanel">
+          <div className="serviceOpsTitle"><div><h2>Servis Durumu</h2><p>Atanan işlerin personel bazında güncel durumu.</p></div><span>{serviceStatusRows.length} servis personeli</span></div>
+          <div className="serviceStatusGrid">
+            {serviceStatusRows.map(row => <article key={row.id}>
+              <h3>{row.name}</h3>
+              <div><span><b>{row.pending}</b> Bekliyor</span><span><b>{row.inProgress}</b> İşlemde</span><span><b>{row.completed}</b> Tamamlandı</span><span><b>{row.postponed}</b> Ertelendi</span></div>
+            </article>)}
+          </div>
+        </div>}
         <div className="stats">
           <article><span>Bugünkü iş</span><strong>{jobs.filter(j => new Date(j.scheduled_at).toDateString() === today).length}</strong></article>
           <article><span>Bekleyen</span><strong>{jobs.filter(j => j.status === 'pending' || j.status === 'in_progress').length}</strong></article>
@@ -723,10 +788,10 @@ export default function Home() {
         <div className="panel">
           <div className="panelHead jobPanelHead">
             <div><h2>{filter === 'bugun' ? 'Bugünün İşleri' : filter === 'bekleyen' ? 'Bekleyen İşler' : 'Tamamlanan İşler'}</h2><input className="searchInput" value={search} onChange={e=>setSearch(e.target.value)} placeholder="Müşteri, telefon, servis veya iş ara…" /></div>
-            <div className="quickFilters"><button className={jobQuickFilter==='all'?'selected':''} onClick={()=>setJobQuickFilter('all')}>Tümü</button><button className={jobQuickFilter==='urgent'?'selected':''} onClick={()=>setJobQuickFilter('urgent')}>Acil</button><button className={jobQuickFilter==='late'?'selected':''} onClick={()=>setJobQuickFilter('late')}>Geciken</button><button className={jobQuickFilter==='upcoming'?'selected':''} onClick={()=>setJobQuickFilter('upcoming')}>Yaklaşan</button><span>{searched.length} kayıt</span></div>
+            <div className="quickFilters"><button className={jobQuickFilter==='all'?'selected':''} onClick={()=>setJobQuickFilter('all')}>Tümü</button><button className={jobQuickFilter==='urgent'?'selected':''} onClick={()=>setJobQuickFilter('urgent')}>Acil</button><button className={jobQuickFilter==='late'?'selected':''} onClick={()=>setJobQuickFilter('late')}>Geciken</button><button className={jobQuickFilter==='upcoming'?'selected':''} onClick={()=>setJobQuickFilter('upcoming')}>Yaklaşan</button><span>{displayJobs.length} kayıt</span></div>
           </div>
-          {loading ? <div className="empty">Yükleniyor…</div> : searched.length === 0 ? <div className="empty">Bu bölümde iş bulunmuyor.</div> :
-            <div className="jobList">{searched.map(job => {
+          {loading ? <div className="empty">Yükleniyor…</div> : displayJobs.length === 0 ? <div className="empty">Bu bölümde iş bulunmuyor.</div> :
+            <div className="jobList">{displayJobs.map(job => {
               const late = job.status !== 'completed' && new Date(job.scheduled_at).getTime() < Date.now()
               const diff = new Date(job.scheduled_at).getTime() - Date.now()
               const upcoming = job.status !== 'completed' && diff >= 0 && diff <= 2 * 60 * 60 * 1000
@@ -734,11 +799,15 @@ export default function Home() {
               <div className="time"><strong>{new Date(job.scheduled_at).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}</strong><small>{new Date(job.scheduled_at).toLocaleDateString('tr-TR')}</small></div>
               <div className="jobInfo">
                 <div className="jobTitle"><h3>{job.customer_name}</h3><span className={`badge ${job.status}`}>{statusText[job.status]}</span>{job.priority === 'urgent' && <span className="priorityBadge">ACİL</span>}{late && <span className="lateBadge">GECİKTİ</span>}{!late && upcoming && <span className="upcomingBadge">YAKLAŞIYOR</span>}</div>
-                <a href={`tel:${job.customer_phone}`}>{job.customer_phone}</a><p>{job.description}</p>
-                <div className="jobMeta"><small>Ekleyen: <b>{job.creator?.full_name || job.created_by_name || 'SUTEK Personeli'}</b></small><small>Servis: <b>{job.assignee?.full_name || 'Atanmadı'}</b></small></div>
+                <a href={`tel:${job.customer_phone}`}>{job.customer_phone}</a>
+                {job.customer_address && <div className="jobAddress">📍 {job.customer_address}</div>}
+                <p>{job.description}</p>
+                <div className="jobMeta"><small>Ekleyen: <b>{job.creator?.full_name || job.created_by_name || 'SUTEK Personeli'}</b></small><small className={job.assigned_to === currentUserId ? 'assignedMe' : ''}>Servis: <b>{job.assignee?.full_name || 'Atanmadı'}</b></small></div>
               </div>
               <div className="actions">
                 {canSchedule && <button onClick={() => setEditJob(job)}>Düzenle</button>}
+                <a className="actionLink" href={`tel:${job.customer_phone}`}>Ara</a>
+                {job.customer_address && <button onClick={() => openMap(job.customer_address)}>Haritada Aç</button>}
                 <button onClick={() => setHistoryPhone(job.customer_phone)}>Geçmiş</button>
                 <button onClick={() => setFilesJob(job)}>Dosyalar ({attachments.filter(a => a.job_id === job.id).length})</button>
                 <button onClick={() => uploadJobFile(job)} disabled={fileBusy}>+ Dosya</button>
@@ -829,6 +898,7 @@ export default function Home() {
           <div className="grid2"><label>Tarih<input name="date" type="date" required defaultValue={localDateForJob(editJob.scheduled_at)} /></label><label>Saat<input name="time" type="time" required defaultValue={localTimeForJob(editJob.scheduled_at)} /></label></div>
           <label>Müşteri Adı<input name="customer_name" required defaultValue={editJob.customer_name} /></label>
           <label>Telefon<input name="customer_phone" required inputMode="tel" defaultValue={editJob.customer_phone} /></label>
+          <label>Adres (isteğe bağlı)<input name="customer_address" defaultValue={editJob.customer_address || ''} placeholder="Servisin gideceği adres" /></label>
           <label>Yapılacak İş<textarea name="description" required rows={4} defaultValue={editJob.description} /></label>
           <div className="grid2">
             <label>Öncelik<select name="priority" defaultValue={editJob.priority || 'normal'}><option value="normal">Normal</option><option value="urgent">Acil</option></select></label>
@@ -873,6 +943,6 @@ export default function Home() {
 
     {showPersonnelForm && role === 'admin' && <div className="modalBackdrop" onMouseDown={() => setShowPersonnelForm(false)}><div className="modal" onMouseDown={e => e.stopPropagation()}><div className="modalHead"><div><h2>Yeni Personel Ekle</h2><p>Kullanıcı hemen giriş yapabilir.</p></div><button onClick={() => setShowPersonnelForm(false)}>×</button></div><form onSubmit={createPersonnel}><label>Ad Soyad<input name="full_name" required /></label><label>E-posta<input name="email" type="email" required /></label><label>Geçici Şifre<input name="password" type="password" minLength={6} required /></label><label>Rol<select name="role" defaultValue="office"><option value="office">Ofis</option><option value="service">Servis</option><option value="admin">Yönetici</option></select></label>{personnelMessage && <div className="authMessage">{personnelMessage}</div>}<div className="formActions"><button type="button" onClick={() => setShowPersonnelForm(false)}>Vazgeç</button><button className="primary" type="submit" disabled={personnelBusy}>{personnelBusy ? 'Oluşturuluyor…' : 'Personeli Oluştur'}</button></div></form></div></div>}
 
-    {showForm && <div className="modalBackdrop" onMouseDown={() => setShowForm(false)}><div className="modal" onMouseDown={e => e.stopPropagation()}><div className="modalHead"><div><h2>Yeni İş Ekle</h2><p>İş servis bölümüne iletilecek.</p></div><button onClick={() => setShowForm(false)}>×</button></div><form onSubmit={createJob}><div className="grid2"><label>Tarih<input name="date" type="date" required defaultValue={localDateInputValue()} /></label><label>Saat<input name="time" type="time" required /></label></div><label>Müşteri Adı<input name="customer_name" required /></label><label>Telefon<input name="customer_phone" required inputMode="tel" /></label><label>Yapılacak İş<textarea name="description" required rows={4} /></label><div className="grid2"><label>Öncelik<select name="priority" defaultValue="normal"><option value="normal">Normal</option><option value="urgent">Acil</option></select></label><label>Servis Personeli<select name="assigned_to" defaultValue=""><option value="">Atama yok</option>{serviceProfiles.map(p => <option key={p.id} value={p.id}>{p.full_name}</option>)}</select></label></div><div className="creator">Ekleyen kişi otomatik kaydedilecek: <b>{profileName}</b></div><div className="formActions"><button type="button" onClick={() => setShowForm(false)}>Vazgeç</button><button className="primary" type="submit">İşi Oluştur</button></div></form></div></div>}
+    {showForm && <div className="modalBackdrop" onMouseDown={() => setShowForm(false)}><div className="modal" onMouseDown={e => e.stopPropagation()}><div className="modalHead"><div><h2>Yeni İş Ekle</h2><p>İş servis bölümüne iletilecek.</p></div><button onClick={() => setShowForm(false)}>×</button></div><form onSubmit={createJob}><div className="grid2"><label>Tarih<input name="date" type="date" required defaultValue={localDateInputValue()} /></label><label>Saat<input name="time" type="time" required /></label></div><label>Müşteri Adı<input name="customer_name" required /></label><label>Telefon<input name="customer_phone" required inputMode="tel" /></label><label>Adres (isteğe bağlı)<input name="customer_address" placeholder="Servisin gideceği adres" /></label><label>Yapılacak İş<textarea name="description" required rows={4} /></label><div className="grid2"><label>Öncelik<select name="priority" defaultValue="normal"><option value="normal">Normal</option><option value="urgent">Acil</option></select></label><label>Servis Personeli<select name="assigned_to" defaultValue=""><option value="">Atama yok</option>{serviceProfiles.map(p => <option key={p.id} value={p.id}>{p.full_name}</option>)}</select></label></div><div className="creator">Ekleyen kişi otomatik kaydedilecek: <b>{profileName}</b></div><div className="formActions"><button type="button" onClick={() => setShowForm(false)}>Vazgeç</button><button className="primary" type="submit">İşi Oluştur</button></div></form></div></div>}
   </main>
 }
