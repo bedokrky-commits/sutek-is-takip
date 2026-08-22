@@ -198,6 +198,27 @@ export default function Home() {
     return () => { void supabase.removeChannel(channel) }
   }, [supabase, signedIn])
 
+  useEffect(() => {
+    if (!supabase || !signedIn) return
+
+    const checkAlerts = async () => {
+      if (document.visibilityState !== 'visible') return
+      await supabase.rpc('generate_job_alerts')
+    }
+
+    void checkAlerts()
+    const timer = window.setInterval(() => { void checkAlerts() }, 60_000)
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void checkAlerts()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+
+    return () => {
+      window.clearInterval(timer)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
+  }, [supabase, signedIn])
+
   async function signIn(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
     if (!supabase) return
