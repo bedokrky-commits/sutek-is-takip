@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useState } from 'react'
 import { createClient } from '../lib/supabase/client'
+import './v06-additions.css'
 
 type Status = 'pending' | 'in_progress' | 'completed' | 'postponed'
 type Role = 'admin' | 'office' | 'service'
@@ -47,8 +48,9 @@ export default function Home() {
   const [profileName, setProfileName] = useState('SUTEK Kullanıcısı')
   const [role, setRole] = useState<Role>('office')
   const [filter, setFilter] = useState<'bugun' | 'bekleyen' | 'tamamlanan'>('bugun')
-  const [view, setView] = useState<'jobs' | 'personnel'>('jobs')
+  const [view, setView] = useState<'jobs' | 'personnel' | 'customers' | 'reports'>('jobs')
   const [search, setSearch] = useState('')
+  const [customerSearch, setCustomerSearch] = useState('')
   const [historyPhone, setHistoryPhone] = useState<string | null>(null)
   const [showForm, setShowForm] = useState(false)
   const [showNotices, setShowNotices] = useState(false)
@@ -88,7 +90,7 @@ export default function Home() {
       setProfiles((ps ?? []) as Profile[])
     } else {
       setProfiles([])
-      setView('jobs')
+      if (view === 'personnel' || (view === 'reports' && profile?.role === 'service')) setView('jobs')
     }
     setLoading(false)
   }
@@ -169,6 +171,17 @@ export default function Home() {
       body: { job_id: job.id, scheduled_at: parsed.toISOString() }
     })
     if (error || data?.error) return alert(data?.error || error?.message || 'Tarih güncellenemedi.')
+    await load()
+  }
+
+  async function deleteJob(job: Job) {
+    if (!supabase || !['office', 'admin'].includes(role)) return
+    if (!confirm(`${job.customer_name} için girilen işi tamamen silmek istediğinize emin misiniz?`)) return
+    const { data, error } = await supabase.functions.invoke('delete-job', {
+      body: { job_id: job.id }
+    })
+    if (error || data?.error) return alert(data?.error || error?.message || 'İş silinemedi.')
+    if (historyPhone === job.customer_phone) setHistoryPhone(null)
     await load()
   }
 
@@ -253,7 +266,40 @@ export default function Home() {
   const canCreate = role === 'office' || role === 'admin'
   const canOperate = role === 'service' || role === 'admin'
   const canSchedule = role === 'office' || role === 'admin'
+  const canSeeReports = role === 'office' || role === 'admin'
   const unread = notices.filter(n => !n.is_read).length
+
+  const customerMap = new Map<string, { phone: string; name: string; jobs: Job[] }>()
+  for (const job of jobs) {
+    const current = customerMap.get(job.customer_phone)
+    if (current) current.jobs.push(job)
+    else customerMap.set(job.customer_phone, { phone: job.customer_phone, name: job.customer_name, jobs: [job] })
+  }
+  const customers = Array.from(customerMap.values())
+    .filter(c => !customerSearch.trim() || `${c.name} ${c.phone}`.toLocaleLowerCase('tr-TR').includes(customerSearch.toLocaleLowerCase('tr-TR')))
+    .sort((a,b) => a.name.localeCompare(b.name, 'tr'))
+
+  const creatorReportMap = new Map<string, { name: string; total: number; completed: number; postponed: number; pending: number }>()
+  for (const job of jobs) {
+    const name = job.creator?.full_name || job.created_by_name || 'Bilinmeyen Personel'
+    const current = creatorReportMap.get(name) || { name, total: 0, completed: 0, postponed: 0, pending: 0 }
+    current.total += 1
+    if (job.status === 'completed') current.completed += 1
+    else if (job.status === 'postponed') current.postponed += 1
+    else current.pending += 1
+    creatorReportMap.set(name, current)
+  }
+  const creatorReports = Array.from(creatorReportMap.values()).sort((a,b) => b.total - a.total)
+
+  const viewTitle =
+    view === 'personnel' ? 'Personel Yönetimi' :
+    view === 'customers' ? 'Müşteri Geçmişi' :
+    view === 'reports' ? 'Raporlar' : 'İş Programı'
+  const viewSubtitle =
+    view === 'personnel' ? 'Ofis ve servis kullanıcılarını yönetin' :
+    view === 'customers' ? 'Müşterilerin geçmiş iş kayıtlarını görüntüleyin' :
+    view === 'reports' ? 'İş durumu ve personel bazında özetler' :
+    new Intl.DateTimeFormat('tr-TR', { dateStyle: 'full' }).format(new Date())
 
   return <main className="shell">
     <aside className="sidebar">
@@ -262,6 +308,8 @@ export default function Home() {
         <button className={view === 'jobs' && filter === 'bugun' ? 'active' : ''} onClick={() => { setView('jobs'); setFilter('bugun') }}>Bugünün İşleri</button>
         <button className={view === 'jobs' && filter === 'bekleyen' ? 'active' : ''} onClick={() => { setView('jobs'); setFilter('bekleyen') }}>Bekleyen İşler</button>
         <button className={view === 'jobs' && filter === 'tamamlanan' ? 'active' : ''} onClick={() => { setView('jobs'); setFilter('tamamlanan') }}>Tamamlananlar</button>
+        <button className={view === 'customers' ? 'active' : ''} onClick={() => setView('customers')}>Müşteri Geçmişi</button>
+        {canSeeReports && <button className={view === 'reports' ? 'active' : ''} onClick={() => setView('reports')}>Raporlar</button>}
         {role === 'admin' && <button className={view === 'personnel' ? 'active' : ''} onClick={() => setView('personnel')}>Personel Yönetimi</button>}
       </nav>
       <div className="sidebarBottom"><span>{profileName}</span><small>{roleText[role]}</small><button className="signOut" onClick={signOut}>Çıkış yap</button></div>
@@ -269,7 +317,7 @@ export default function Home() {
 
     <section className="content">
       <header className="topbar">
-        <div><h1>{view === 'personnel' ? 'Personel Yönetimi' : 'İş Programı'}</h1><p>{view === 'personnel' ? 'Ofis ve servis kullanıcılarını yönetin' : new Intl.DateTimeFormat('tr-TR', { dateStyle: 'full' }).format(new Date())}</p></div>
+        <div><h1>{viewTitle}</h1><p>{viewSubtitle}</p></div>
         <div className="topActions">
           <button className="noticeBtn" onClick={() => setShowNotices(v => !v)}>🔔 <b>{unread}</b></button>
           {view === 'jobs' && canCreate && <button className="primary" onClick={() => setShowForm(true)}>+ Yeni İş</button>}
@@ -304,11 +352,44 @@ export default function Home() {
                   {job.status !== 'postponed' && <button className="warning" onClick={() => setStatus(job, 'postponed')}>↻ Ertele</button>}
                 </>}
                 {canSchedule && job.status === 'postponed' && <button className="primary" onClick={() => rescheduleJob(job)}>📅 Tarih Belirle</button>}
+                {canSchedule && <button className="dangerBtn" onClick={() => deleteJob(job)}>Sil</button>}
                 {role === 'office' && job.status !== 'postponed' && job.status !== 'completed' && <span className="roleHint">Durumu servis günceller</span>}
               </div>
             </article>)}</div>}
         </div>
-      </> :
+      </> : view === 'customers' ?
+        <div className="panel">
+          <div className="panelHead"><div><h2>Müşteriler</h2><input className="searchInput" value={customerSearch} onChange={e => setCustomerSearch(e.target.value)} placeholder="Müşteri adı veya telefon ara…" /></div><span>{customers.length} müşteri</span></div>
+          {customers.length === 0 ? <div className="empty">Müşteri kaydı bulunamadı.</div> :
+            <div className="customerList">{customers.map(customer => {
+              const completed = customer.jobs.filter(j => j.status === 'completed').length
+              const postponed = customer.jobs.filter(j => j.status === 'postponed').length
+              const lastJob = [...customer.jobs].sort((a,b) => +new Date(b.scheduled_at) - +new Date(a.scheduled_at))[0]
+              return <article className="customerRow" key={customer.phone}>
+                <div><h3>{customer.name}</h3><a href={`tel:${customer.phone}`}>{customer.phone}</a><small>Son iş: {new Date(lastJob.scheduled_at).toLocaleString('tr-TR')}</small></div>
+                <div className="customerStats"><span><b>{customer.jobs.length}</b> Toplam</span><span><b>{completed}</b> Tamamlandı</span><span><b>{postponed}</b> Ertelendi</span></div>
+                <button onClick={() => setHistoryPhone(customer.phone)}>Geçmişi Aç</button>
+              </article>
+            })}</div>}
+        </div>
+      : view === 'reports' && canSeeReports ?
+        <>
+          <div className="stats">
+            <article><span>Toplam iş</span><strong>{jobs.length}</strong></article>
+            <article><span>Bekleyen / İşlemde</span><strong>{jobs.filter(j => j.status === 'pending' || j.status === 'in_progress').length}</strong></article>
+            <article><span>Tamamlanan</span><strong>{jobs.filter(j => j.status === 'completed').length}</strong></article>
+            <article><span>Ertelenen</span><strong>{jobs.filter(j => j.status === 'postponed').length}</strong></article>
+          </div>
+          <div className="panel">
+            <div className="panelHead"><div><h2>İşi Ekleyen Personel Bazında</h2><p className="muted reportIntro">Bu tablo işi sisteme ekleyen kullanıcıya göre hesaplanır.</p></div><span>{creatorReports.length} personel</span></div>
+            {creatorReports.length === 0 ? <div className="empty">Raporlanacak iş bulunmuyor.</div> :
+              <div className="reportTable">
+                <div className="reportRow reportHead"><span>Personel</span><span>Toplam</span><span>Tamamlanan</span><span>Ertelenen</span><span>Bekleyen</span></div>
+                {creatorReports.map(r => <div className="reportRow" key={r.name}><b>{r.name}</b><span>{r.total}</span><span>{r.completed}</span><span>{r.postponed}</span><span>{r.pending}</span></div>)}
+              </div>}
+          </div>
+        </>
+      :
         <div className="panel personnelPanel">
           <div className="panelHead"><div><h2>SUTEK Personeli</h2><p className="muted personnelIntro">Kullanıcı rollerini ve hesap durumlarını buradan yönetin.</p></div><span>{profiles.length} personel</span></div>
           {personnelMessage && <div className="personnelMessage">{personnelMessage}</div>}
