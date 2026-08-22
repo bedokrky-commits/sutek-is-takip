@@ -16,6 +16,17 @@ type Job = {
   created_by?: string
   created_by_name?: string
   creator?: { full_name?: string } | null
+  customer_report?: string | null
+  report_updated_at?: string | null
+}
+type Attachment = {
+  id: string
+  job_id: string
+  file_name: string
+  storage_path: string
+  mime_type?: string | null
+  file_size?: number | null
+  created_at: string
 }
 type Notice = { id: string; title?: string; message: string; created_at: string; is_read: boolean; job_id?: string | null }
 type Profile = { id: string; full_name: string; email?: string | null; role: Role; is_active: boolean; phone?: string | null }
@@ -43,6 +54,12 @@ export default function Home() {
   const [notices, setNotices] = useState<Notice[]>([])
   const [profiles, setProfiles] = useState<Profile[]>([])
   const [jobHistory, setJobHistory] = useState<JobHistory[]>([])
+  const [attachments, setAttachments] = useState<Attachment[]>([])
+  const [filesJob, setFilesJob] = useState<Job | null>(null)
+  const [reportJob, setReportJob] = useState<Job | null>(null)
+  const [reportDraft, setReportDraft] = useState('')
+  const [fileBusy, setFileBusy] = useState(false)
+  const [reportBusy, setReportBusy] = useState(false)
   const [signedIn, setSignedIn] = useState(!configured)
   const [loading, setLoading] = useState(true)
   const [authBusy, setAuthBusy] = useState(false)
@@ -82,14 +99,16 @@ export default function Home() {
       setRole(profile.role as Role)
     }
 
-    const [{ data: js }, { data: ns }, { data: hs }] = await Promise.all([
+    const [{ data: js }, { data: ns }, { data: hs }, { data: at }] = await Promise.all([
       supabase.from('jobs').select('*, creator:profiles!jobs_created_by_fkey(full_name)').order('scheduled_at', { ascending: true }),
       supabase.from('notifications').select('*').eq('user_id', user.id).order('created_at', { ascending: false }).limit(30),
-      supabase.from('job_status_history').select('id,job_id,new_status,created_at,changed_by,changer:profiles!job_status_history_changed_by_fkey(full_name,role)').order('created_at', { ascending: true })
+      supabase.from('job_status_history').select('id,job_id,new_status,created_at,changed_by,changer:profiles!job_status_history_changed_by_fkey(full_name,role)').order('created_at', { ascending: true }),
+      supabase.from('job_attachments').select('id,job_id,file_name,storage_path,mime_type,file_size,created_at').order('created_at', { ascending: false })
     ])
     setJobs((js ?? []) as Job[])
     setNotices((ns ?? []) as Notice[])
     setJobHistory((hs ?? []) as JobHistory[])
+    setAttachments((at ?? []) as Attachment[])
 
     if (profile?.role === 'admin') {
       const { data: ps } = await supabase.from('profiles').select('id,full_name,email,role,is_active,phone').order('full_name')
@@ -113,6 +132,7 @@ export default function Home() {
     const channel = supabase.channel('team-live')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'jobs' }, () => load())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'notifications' }, () => load())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'job_attachments' }, () => load())
       .subscribe()
     return () => { supabase.removeChannel(channel) }
   }, [supabase, signedIn])
@@ -178,6 +198,94 @@ export default function Home() {
     })
     if (error || data?.error) return alert(data?.error || error?.message || 'Tarih güncellenemedi.')
     await load()
+  }
+
+  async function uploadJobFile(job: Job) {
+    if (!supabase) return
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.accept = 'image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt'
+    input.onchange = async () => {
+      const file = input.files?.[0]
+      if (!file) return
+      if (file.size > 10 * 1024 * 1024) return alert('Dosya en fazla 10 MB olabilir.')
+      setFileBusy(true)
+      try {
+        const { data: auth } = await supabase.auth.getUser()
+        if (!auth.user) return alert('Oturum bulunamadı.')
+        const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_')
+        const path = `${auth.user.id}/${job.id}/${Date.now()}-${safeName}`
+        const { error: uploadError } = await supabase.storage.from('job-files').upload(path, file, { upsert: false })
+        if (uploadError) return alert('Dosya yüklenemedi: ' + uploadError.message)
+        const { error: rowError } = await supabase.from('job_attachments').insert({
+          job_id: job.id,
+          file_name: file.name,
+          storage_path: path,
+          mime_type: file.type || null,
+          file_size: file.size,
+          uploaded_by: auth.user.id
+        })
+        if (rowError) {
+          await supabase.storage.from('job-files').remove([path])
+          return alert('Dosya kaydı oluşturulamadı: ' + rowError.message)
+        }
+        await load()
+        setFilesJob(job)
+      } finally {
+        setFileBusy(false)
+      }
+    }
+    input.click()
+  }
+
+  async function openAttachment(file: Attachment) {
+    if (!supabase) return
+    const { data, error } = await supabase.storage.from('job-files').createSignedUrl(file.storage_path, 60 * 10)
+    if (error || !data?.signedUrl) return alert('Dosya açılamadı.')
+    window.open(data.signedUrl, '_blank', 'noopener,noreferrer')
+  }
+
+  async function deleteAttachment(file: Attachment) {
+    if (!supabase) return
+    if (!confirm(`${file.file_name} dosyasını silmek istediğinize emin misiniz?`)) return
+    const { error: storageError } = await supabase.storage.from('job-files').remove([file.storage_path])
+    if (storageError) return alert('Dosya silinemedi: ' + storageError.message)
+    const { error } = await supabase.from('job_attachments').delete().eq('id', file.id)
+    if (error) return alert('Dosya kaydı silinemedi: ' + error.message)
+    await load()
+  }
+
+  function openReport(job: Job) {
+    setReportJob(job)
+    setReportDraft(job.customer_report || '')
+  }
+
+  async function saveCustomerReport() {
+    if (!supabase || !reportJob || !['service', 'admin'].includes(role)) return
+    const report = reportDraft.trim()
+    if (!report) return alert('Müşteri raporu boş olamaz.')
+    setReportBusy(true)
+    const { data: auth } = await supabase.auth.getUser()
+    if (!auth.user) { setReportBusy(false); return }
+    const { error } = await supabase.from('jobs').update({
+      customer_report: report,
+      report_updated_at: new Date().toISOString(),
+      report_updated_by: auth.user.id
+    }).eq('id', reportJob.id)
+    setReportBusy(false)
+    if (error) return alert('Rapor kaydedilemedi: ' + error.message)
+    await load()
+    setReportJob(null)
+  }
+
+  function whatsappCustomerReport(job: Job) {
+    const report = (job.customer_report || '').trim()
+    if (!report) return alert('Bu iş için henüz müşteri raporu yazılmamış.')
+    let phone = job.customer_phone.replace(/\D/g, '')
+    if (phone.startsWith('0')) phone = '90' + phone.slice(1)
+    else if (phone.startsWith('5')) phone = '90' + phone
+    const message = `SUTEK Servis Raporu\nMüşteri: ${job.customer_name}\n\n${report}`
+    window.open(`https://wa.me/${phone}?text=${encodeURIComponent(message)}`, '_blank', 'noopener,noreferrer')
   }
 
   async function deleteJob(job: Job) {
@@ -458,6 +566,10 @@ export default function Home() {
               <div className="jobInfo"><div className="jobTitle"><h3>{job.customer_name}</h3><span className={`badge ${job.status}`}>{statusText[job.status]}</span></div><a href={`tel:${job.customer_phone}`}>{job.customer_phone}</a><p>{job.description}</p><small>Ekleyen: <b>{job.creator?.full_name || job.created_by_name || 'SUTEK Personeli'}</b></small></div>
               <div className="actions">
                 <button onClick={() => setHistoryPhone(job.customer_phone)}>Geçmiş</button>
+                <button onClick={() => setFilesJob(job)}>Dosyalar ({attachments.filter(a => a.job_id === job.id).length})</button>
+                <button onClick={() => uploadJobFile(job)} disabled={fileBusy}>+ Dosya</button>
+                <button onClick={() => openReport(job)}>{job.customer_report ? 'Raporu Aç' : 'Rapor Yaz'}</button>
+                {job.customer_report && <button className="whatsappBtn" onClick={() => whatsappCustomerReport(job)}>WhatsApp</button>}
                 {canOperate && job.status !== 'completed' && <>
                   {job.status !== 'in_progress' && <button onClick={() => setStatus(job, 'in_progress')}>İşleme Al</button>}
                   <button className="success" onClick={() => setStatus(job, 'completed')}>✓ Tamamlandı</button>
@@ -535,6 +647,36 @@ export default function Home() {
           </article>)}</div>
         </div>}
     </section>
+
+    {filesJob && <div className="modalBackdrop" onMouseDown={() => setFilesJob(null)}>
+      <div className="modal historyModal" onMouseDown={e => e.stopPropagation()}>
+        <div className="modalHead"><div><h2>İş Dosyaları</h2><p>{filesJob.customer_name}</p></div><button onClick={() => setFilesJob(null)}>×</button></div>
+        <div className="fileModalActions"><button className="primary" onClick={() => uploadJobFile(filesJob)} disabled={fileBusy}>{fileBusy ? 'Yükleniyor…' : '+ Fotoğraf / Dosya Ekle'}</button></div>
+        <div className="attachmentList">
+          {attachments.filter(a => a.job_id === filesJob.id).length === 0 ? <div className="empty compactEmpty">Henüz dosya eklenmemiş.</div> :
+            attachments.filter(a => a.job_id === filesJob.id).map(file => <article key={file.id}>
+              <div className="attachmentIcon">{file.mime_type?.startsWith('image/') ? '🖼️' : '📎'}</div>
+              <div className="attachmentInfo"><b>{file.file_name}</b><small>{file.file_size ? `${(file.file_size/1024/1024).toFixed(2)} MB` : ''} · {new Date(file.created_at).toLocaleString('tr-TR')}</small></div>
+              <div className="attachmentActions"><button onClick={() => openAttachment(file)}>Aç</button><button className="dangerBtn" onClick={() => deleteAttachment(file)}>Sil</button></div>
+            </article>)}
+        </div>
+      </div>
+    </div>}
+
+    {reportJob && <div className="modalBackdrop" onMouseDown={() => setReportJob(null)}>
+      <div className="modal reportModal" onMouseDown={e => e.stopPropagation()}>
+        <div className="modalHead"><div><h2>Müşteri Raporu</h2><p>{reportJob.customer_name} · {reportJob.customer_phone}</p></div><button onClick={() => setReportJob(null)}>×</button></div>
+        <label className="reportLabel">Müşteriye gönderilecek rapor
+          <textarea rows={9} value={reportDraft} onChange={e => setReportDraft(e.target.value)} readOnly={!['service','admin'].includes(role)} placeholder="Servis yapılan işlemi ve sonucu müşterinin anlayacağı şekilde yazsın…" />
+        </label>
+        <div className="reportHelp">WhatsApp üzerinden yalnızca bu alana yazılan rapor paylaşılır.</div>
+        <div className="formActions">
+          {reportJob.customer_report && <button type="button" className="whatsappBtn" onClick={() => whatsappCustomerReport({ ...reportJob, customer_report: reportDraft || reportJob.customer_report })}>WhatsApp'ta Paylaş</button>}
+          <button type="button" onClick={() => setReportJob(null)}>Kapat</button>
+          {['service','admin'].includes(role) && <button className="primary" type="button" disabled={reportBusy} onClick={saveCustomerReport}>{reportBusy ? 'Kaydediliyor…' : 'Raporu Kaydet'}</button>}
+        </div>
+      </div>
+    </div>}
 
     {historyPhone && <div className="modalBackdrop" onMouseDown={() => setHistoryPhone(null)}><div className="modal historyModal" onMouseDown={e => e.stopPropagation()}><div className="modalHead"><div><h2>Müşteri Geçmişi</h2><p>{historyPhone} · {historyJobs.length} kayıt</p></div><button onClick={() => setHistoryPhone(null)}>×</button></div><div className="historyList">{historyJobs.map(h => <article key={h.id}><div><b>{new Date(h.scheduled_at).toLocaleString('tr-TR')}</b><span className={`badge ${h.status}`}>{statusText[h.status]}</span></div><h3>{h.customer_name}</h3><p>{h.description}</p></article>)}</div></div></div>}
 
