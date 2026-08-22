@@ -18,6 +18,9 @@ type Job = {
   creator?: { full_name?: string } | null
   customer_report?: string | null
   report_updated_at?: string | null
+  assigned_to?: string | null
+  priority?: 'normal' | 'urgent'
+  assignee?: { full_name?: string } | null
 }
 type Attachment = {
   id: string
@@ -60,6 +63,9 @@ export default function Home() {
   const [reportDraft, setReportDraft] = useState('')
   const [fileBusy, setFileBusy] = useState(false)
   const [reportBusy, setReportBusy] = useState(false)
+  const [serviceProfiles, setServiceProfiles] = useState<Profile[]>([])
+  const [editJob, setEditJob] = useState<Job | null>(null)
+  const [jobQuickFilter, setJobQuickFilter] = useState<'all' | 'urgent' | 'late' | 'upcoming'>('all')
   const [signedIn, setSignedIn] = useState(!configured)
   const [loading, setLoading] = useState(true)
   const [authBusy, setAuthBusy] = useState(false)
@@ -100,7 +106,7 @@ export default function Home() {
     }
 
     const [{ data: js }, { data: ns }, { data: hs }, { data: at }] = await Promise.all([
-      supabase.from('jobs').select('*, creator:profiles!jobs_created_by_fkey(full_name)').order('scheduled_at', { ascending: true }),
+      supabase.from('jobs').select('*, creator:profiles!jobs_created_by_fkey(full_name), assignee:profiles!jobs_assigned_to_fkey(full_name)').order('scheduled_at', { ascending: true }),
       supabase.from('notifications').select('*').eq('user_id', user.id).order('created_at', { ascending: false }).limit(30),
       supabase.from('job_status_history').select('id,job_id,new_status,created_at,changed_by,changer:profiles!job_status_history_changed_by_fkey(full_name,role)').order('created_at', { ascending: true }),
       supabase.from('job_attachments').select('id,job_id,file_name,storage_path,mime_type,file_size,created_at').order('created_at', { ascending: false })
@@ -113,9 +119,16 @@ export default function Home() {
     if (profile?.role === 'admin') {
       const { data: ps } = await supabase.from('profiles').select('id,full_name,email,role,is_active,phone').order('full_name')
       setProfiles((ps ?? []) as Profile[])
+      setServiceProfiles(((ps ?? []) as Profile[]).filter(p => p.role === 'service' && p.is_active))
+    } else if (profile?.role === 'office') {
+      setProfiles([])
+      const { data: servicePs } = await supabase.from('profiles').select('id,full_name,email,role,is_active,phone').eq('role','service').eq('is_active',true).order('full_name')
+      setServiceProfiles((servicePs ?? []) as Profile[])
+      if (view === 'personnel') setView('jobs')
     } else {
       setProfiles([])
-      if (view === 'personnel' || (view === 'reports' && profile?.role === 'service')) setView('jobs')
+      setServiceProfiles([])
+      if (view === 'personnel' || view === 'reports') setView('jobs')
     }
     setLoading(false)
   }
@@ -169,6 +182,8 @@ export default function Home() {
       customer_name: String(fd.get('customer_name')).trim(),
       customer_phone: String(fd.get('customer_phone')).trim(),
       description: String(fd.get('description')).trim(),
+      priority: String(fd.get('priority') || 'normal') === 'urgent' ? 'urgent' : 'normal',
+      assigned_to: String(fd.get('assigned_to') || '') || null,
       created_by: auth.user.id
     })
     if (error) return alert(error.message)
@@ -198,6 +213,39 @@ export default function Home() {
     })
     if (error || data?.error) return alert(data?.error || error?.message || 'Tarih güncellenemedi.')
     await load()
+  }
+
+  async function saveJobEdit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault()
+    if (!supabase || !editJob || !['office', 'admin'].includes(role)) return
+    const fd = new FormData(e.currentTarget)
+    const scheduled = new Date(`${fd.get('date')}T${fd.get('time')}`)
+    const { data, error } = await supabase.functions.invoke('update-job-details', {
+      body: {
+        job_id: editJob.id,
+        customer_name: String(fd.get('customer_name')).trim(),
+        customer_phone: String(fd.get('customer_phone')).trim(),
+        description: String(fd.get('description')).trim(),
+        scheduled_at: scheduled.toISOString(),
+        priority: String(fd.get('priority') || 'normal'),
+        assigned_to: String(fd.get('assigned_to') || '') || null
+      }
+    })
+    if (error || data?.error) return alert(data?.error || error?.message || 'İş düzenlenemedi.')
+    setEditJob(null)
+    await load()
+  }
+
+  function localDateForJob(value: string) {
+    const d = new Date(value)
+    const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000)
+    return local.toISOString().slice(0,10)
+  }
+
+  function localTimeForJob(value: string) {
+    const d = new Date(value)
+    const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000)
+    return local.toISOString().slice(11,16)
   }
 
   async function uploadJobFile(job: Job) {
@@ -466,7 +514,17 @@ export default function Home() {
     if (filter === 'tamamlanan') return j.status === 'completed'
     return new Date(j.scheduled_at).toDateString() === today
   })
-  const searched = visible.filter(j => !search.trim() || `${j.customer_name} ${j.customer_phone} ${j.description}`.toLocaleLowerCase('tr-TR').includes(search.toLocaleLowerCase('tr-TR')))
+  const searchedBase = visible.filter(j => !search.trim() || `${j.customer_name} ${j.customer_phone} ${j.description} ${j.assignee?.full_name || ''}`.toLocaleLowerCase('tr-TR').includes(search.toLocaleLowerCase('tr-TR')))
+  const nowMs = Date.now()
+  const searched = searchedBase.filter(j => {
+    if (jobQuickFilter === 'urgent') return j.priority === 'urgent' && j.status !== 'completed'
+    if (jobQuickFilter === 'late') return j.status !== 'completed' && new Date(j.scheduled_at).getTime() < nowMs
+    if (jobQuickFilter === 'upcoming') {
+      const diff = new Date(j.scheduled_at).getTime() - nowMs
+      return j.status !== 'completed' && diff >= 0 && diff <= 2 * 60 * 60 * 1000
+    }
+    return true
+  })
   const historyJobs = historyPhone ? jobs.filter(j => j.customer_phone === historyPhone).sort((a,b) => +new Date(b.scheduled_at) - +new Date(a.scheduled_at)) : []
   const canCreate = role === 'office' || role === 'admin'
   const canOperate = role === 'service' || role === 'admin'
@@ -559,12 +617,24 @@ export default function Home() {
         </div>
 
         <div className="panel">
-          <div className="panelHead"><div><h2>{filter === 'bugun' ? 'Bugünün İşleri' : filter === 'bekleyen' ? 'Bekleyen İşler' : 'Tamamlanan İşler'}</h2><input className="searchInput" value={search} onChange={e=>setSearch(e.target.value)} placeholder="Müşteri, telefon veya iş ara…" /></div><span>{searched.length} kayıt</span></div>
+          <div className="panelHead jobPanelHead">
+            <div><h2>{filter === 'bugun' ? 'Bugünün İşleri' : filter === 'bekleyen' ? 'Bekleyen İşler' : 'Tamamlanan İşler'}</h2><input className="searchInput" value={search} onChange={e=>setSearch(e.target.value)} placeholder="Müşteri, telefon, servis veya iş ara…" /></div>
+            <div className="quickFilters"><button className={jobQuickFilter==='all'?'selected':''} onClick={()=>setJobQuickFilter('all')}>Tümü</button><button className={jobQuickFilter==='urgent'?'selected':''} onClick={()=>setJobQuickFilter('urgent')}>Acil</button><button className={jobQuickFilter==='late'?'selected':''} onClick={()=>setJobQuickFilter('late')}>Geciken</button><button className={jobQuickFilter==='upcoming'?'selected':''} onClick={()=>setJobQuickFilter('upcoming')}>Yaklaşan</button><span>{searched.length} kayıt</span></div>
+          </div>
           {loading ? <div className="empty">Yükleniyor…</div> : searched.length === 0 ? <div className="empty">Bu bölümde iş bulunmuyor.</div> :
-            <div className="jobList">{searched.map(job => <article className="job" key={job.id}>
+            <div className="jobList">{searched.map(job => {
+              const late = job.status !== 'completed' && new Date(job.scheduled_at).getTime() < Date.now()
+              const diff = new Date(job.scheduled_at).getTime() - Date.now()
+              const upcoming = job.status !== 'completed' && diff >= 0 && diff <= 2 * 60 * 60 * 1000
+              return <article className={`job ${job.priority === 'urgent' ? 'urgentJob' : ''} ${late ? 'lateJob' : upcoming ? 'upcomingJob' : ''}`} key={job.id}>
               <div className="time"><strong>{new Date(job.scheduled_at).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}</strong><small>{new Date(job.scheduled_at).toLocaleDateString('tr-TR')}</small></div>
-              <div className="jobInfo"><div className="jobTitle"><h3>{job.customer_name}</h3><span className={`badge ${job.status}`}>{statusText[job.status]}</span></div><a href={`tel:${job.customer_phone}`}>{job.customer_phone}</a><p>{job.description}</p><small>Ekleyen: <b>{job.creator?.full_name || job.created_by_name || 'SUTEK Personeli'}</b></small></div>
+              <div className="jobInfo">
+                <div className="jobTitle"><h3>{job.customer_name}</h3><span className={`badge ${job.status}`}>{statusText[job.status]}</span>{job.priority === 'urgent' && <span className="priorityBadge">ACİL</span>}{late && <span className="lateBadge">GECİKTİ</span>}{!late && upcoming && <span className="upcomingBadge">YAKLAŞIYOR</span>}</div>
+                <a href={`tel:${job.customer_phone}`}>{job.customer_phone}</a><p>{job.description}</p>
+                <div className="jobMeta"><small>Ekleyen: <b>{job.creator?.full_name || job.created_by_name || 'SUTEK Personeli'}</b></small><small>Servis: <b>{job.assignee?.full_name || 'Atanmadı'}</b></small></div>
+              </div>
               <div className="actions">
+                {canSchedule && <button onClick={() => setEditJob(job)}>Düzenle</button>}
                 <button onClick={() => setHistoryPhone(job.customer_phone)}>Geçmiş</button>
                 <button onClick={() => setFilesJob(job)}>Dosyalar ({attachments.filter(a => a.job_id === job.id).length})</button>
                 <button onClick={() => uploadJobFile(job)} disabled={fileBusy}>+ Dosya</button>
@@ -579,7 +649,7 @@ export default function Home() {
                 {canSchedule && <button className="dangerBtn" onClick={() => deleteJob(job)}>Sil</button>}
                 {role === 'office' && job.status !== 'postponed' && job.status !== 'completed' && <span className="roleHint">Durumu servis günceller</span>}
               </div>
-            </article>)}</div>}
+            </article>})}</div>}
         </div>
       </> : view === 'customers' ?
         <div className="panel">
@@ -648,6 +718,23 @@ export default function Home() {
         </div>}
     </section>
 
+    {editJob && canSchedule && <div className="modalBackdrop" onMouseDown={() => setEditJob(null)}>
+      <div className="modal" onMouseDown={e => e.stopPropagation()}>
+        <div className="modalHead"><div><h2>İşi Düzenle</h2><p>{editJob.customer_name}</p></div><button onClick={() => setEditJob(null)}>×</button></div>
+        <form onSubmit={saveJobEdit}>
+          <div className="grid2"><label>Tarih<input name="date" type="date" required defaultValue={localDateForJob(editJob.scheduled_at)} /></label><label>Saat<input name="time" type="time" required defaultValue={localTimeForJob(editJob.scheduled_at)} /></label></div>
+          <label>Müşteri Adı<input name="customer_name" required defaultValue={editJob.customer_name} /></label>
+          <label>Telefon<input name="customer_phone" required inputMode="tel" defaultValue={editJob.customer_phone} /></label>
+          <label>Yapılacak İş<textarea name="description" required rows={4} defaultValue={editJob.description} /></label>
+          <div className="grid2">
+            <label>Öncelik<select name="priority" defaultValue={editJob.priority || 'normal'}><option value="normal">Normal</option><option value="urgent">Acil</option></select></label>
+            <label>Servis Personeli<select name="assigned_to" defaultValue={editJob.assigned_to || ''}><option value="">Atama yok</option>{serviceProfiles.map(p => <option key={p.id} value={p.id}>{p.full_name}</option>)}</select></label>
+          </div>
+          <div className="formActions"><button type="button" onClick={() => setEditJob(null)}>Vazgeç</button><button className="primary" type="submit">Değişiklikleri Kaydet</button></div>
+        </form>
+      </div>
+    </div>}
+
     {filesJob && <div className="modalBackdrop" onMouseDown={() => setFilesJob(null)}>
       <div className="modal historyModal" onMouseDown={e => e.stopPropagation()}>
         <div className="modalHead"><div><h2>İş Dosyaları</h2><p>{filesJob.customer_name}</p></div><button onClick={() => setFilesJob(null)}>×</button></div>
@@ -682,6 +769,6 @@ export default function Home() {
 
     {showPersonnelForm && role === 'admin' && <div className="modalBackdrop" onMouseDown={() => setShowPersonnelForm(false)}><div className="modal" onMouseDown={e => e.stopPropagation()}><div className="modalHead"><div><h2>Yeni Personel Ekle</h2><p>Kullanıcı hemen giriş yapabilir.</p></div><button onClick={() => setShowPersonnelForm(false)}>×</button></div><form onSubmit={createPersonnel}><label>Ad Soyad<input name="full_name" required /></label><label>E-posta<input name="email" type="email" required /></label><label>Geçici Şifre<input name="password" type="password" minLength={6} required /></label><label>Rol<select name="role" defaultValue="office"><option value="office">Ofis</option><option value="service">Servis</option><option value="admin">Yönetici</option></select></label>{personnelMessage && <div className="authMessage">{personnelMessage}</div>}<div className="formActions"><button type="button" onClick={() => setShowPersonnelForm(false)}>Vazgeç</button><button className="primary" type="submit" disabled={personnelBusy}>{personnelBusy ? 'Oluşturuluyor…' : 'Personeli Oluştur'}</button></div></form></div></div>}
 
-    {showForm && <div className="modalBackdrop" onMouseDown={() => setShowForm(false)}><div className="modal" onMouseDown={e => e.stopPropagation()}><div className="modalHead"><div><h2>Yeni İş Ekle</h2><p>İş servis bölümüne iletilecek.</p></div><button onClick={() => setShowForm(false)}>×</button></div><form onSubmit={createJob}><div className="grid2"><label>Tarih<input name="date" type="date" required defaultValue={localDateInputValue()} /></label><label>Saat<input name="time" type="time" required /></label></div><label>Müşteri Adı<input name="customer_name" required /></label><label>Telefon<input name="customer_phone" required inputMode="tel" /></label><label>Yapılacak İş<textarea name="description" required rows={4} /></label><div className="creator">Ekleyen kişi otomatik kaydedilecek: <b>{profileName}</b></div><div className="formActions"><button type="button" onClick={() => setShowForm(false)}>Vazgeç</button><button className="primary" type="submit">İşi Oluştur</button></div></form></div></div>}
+    {showForm && <div className="modalBackdrop" onMouseDown={() => setShowForm(false)}><div className="modal" onMouseDown={e => e.stopPropagation()}><div className="modalHead"><div><h2>Yeni İş Ekle</h2><p>İş servis bölümüne iletilecek.</p></div><button onClick={() => setShowForm(false)}>×</button></div><form onSubmit={createJob}><div className="grid2"><label>Tarih<input name="date" type="date" required defaultValue={localDateInputValue()} /></label><label>Saat<input name="time" type="time" required /></label></div><label>Müşteri Adı<input name="customer_name" required /></label><label>Telefon<input name="customer_phone" required inputMode="tel" /></label><label>Yapılacak İş<textarea name="description" required rows={4} /></label><div className="grid2"><label>Öncelik<select name="priority" defaultValue="normal"><option value="normal">Normal</option><option value="urgent">Acil</option></select></label><label>Servis Personeli<select name="assigned_to" defaultValue=""><option value="">Atama yok</option>{serviceProfiles.map(p => <option key={p.id} value={p.id}>{p.full_name}</option>)}</select></label></div><div className="creator">Ekleyen kişi otomatik kaydedilecek: <b>{profileName}</b></div><div className="formActions"><button type="button" onClick={() => setShowForm(false)}>Vazgeç</button><button className="primary" type="submit">İşi Oluştur</button></div></form></div></div>}
   </main>
 }

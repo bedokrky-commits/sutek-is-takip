@@ -25,3 +25,10 @@
 .reportModal{width:min(650px,100%)}.reportLabel{display:grid;gap:7px;font-size:13px;font-weight:650}.reportLabel textarea{width:100%;border:1px solid #d9dde4;border-radius:10px;padding:12px;resize:vertical}
 .reportHelp{font-size:12px;color:#6b7280;background:#f5f7fa;border-radius:9px;padding:9px 11px;margin-top:10px}
 @media(max-width:560px){.attachmentList article{grid-template-columns:auto 1fr}.attachmentActions{grid-column:1/-1}.fileModalActions{justify-content:flex-start}}
+
+/* v0.9 usability */
+.jobPanelHead{gap:16px}.quickFilters{display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end}.quickFilters button{border:1px solid #d9dde4;background:white;border-radius:8px;padding:7px 9px;font-size:11px}.quickFilters button.selected{background:#111827;color:white;border-color:#111827}.quickFilters span{color:#6b7280;font-size:12px;margin-left:5px}
+.priorityBadge,.lateBadge,.upcomingBadge{font-size:10px;padding:4px 7px;border-radius:999px;font-weight:800;letter-spacing:.3px}.priorityBadge{background:#fee2e2;color:#991b1b}.lateBadge{background:#7f1d1d;color:white}.upcomingBadge{background:#e0f2fe;color:#075985}
+.urgentJob{box-shadow:inset 4px 0 0 #ef4444}.lateJob{background:#fffafa}.upcomingJob{background:#f9fdff}.jobMeta{display:flex;gap:14px;flex-wrap:wrap;margin-top:8px}.jobMeta small{background:#f5f7fa;border-radius:7px;padding:5px 7px}
+.modal select{width:100%}.actions button:disabled{opacity:.5;cursor:not-allowed}
+@media(max-width:700px){.jobPanelHead{align-items:flex-start;flex-direction:column}.quickFilters{justify-content:flex-start}}
