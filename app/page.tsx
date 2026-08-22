@@ -144,7 +144,7 @@ export default function Home() {
     if (!supabase || !signedIn) return
 
     async function refreshSingleJob(jobId: string) {
-      const { data } = await supabase
+      const { data } = await supabase!
         .from('jobs')
         .select('*, creator:profiles!jobs_created_by_fkey(full_name), assignee:profiles!jobs_assigned_to_fkey(full_name)')
         .eq('id', jobId)
