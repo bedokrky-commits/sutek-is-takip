@@ -17,6 +17,7 @@ type Job = {
   creator?: { full_name?: string } | null
 }
 type Notice = { id: string; title?: string; message: string; created_at: string; is_read: boolean; job_id?: string | null }
+type Profile = { id: string; full_name: string; email?: string | null; role: Role; is_active: boolean; phone?: string | null }
 
 const statusText: Record<Status, string> = {
   pending: 'Bekliyor',
@@ -54,6 +55,11 @@ export default function Home() {
   const [filter, setFilter] = useState<'bugun' | 'bekleyen' | 'tamamlanan'>('bugun')
   const [search, setSearch] = useState('')
   const [historyPhone, setHistoryPhone] = useState<string | null>(null)
+  const [view, setView] = useState<'jobs' | 'personnel'>('jobs')
+  const [profiles, setProfiles] = useState<Profile[]>([])
+  const [showPersonnelForm, setShowPersonnelForm] = useState(false)
+  const [personnelBusy, setPersonnelBusy] = useState(false)
+  const [personnelMessage, setPersonnelMessage] = useState('')
 
   async function load() {
     if (!supabase) {
@@ -70,8 +76,15 @@ export default function Home() {
     setSignedIn(Boolean(user))
     if (!user) { setLoading(false); return }
 
-    const { data: profile } = await supabase.from('profiles').select('full_name, role').eq('id', user.id).single()
+    const { data: profile } = await supabase.from('profiles').select('full_name, role, is_active').eq('id', user.id).single()
     if (profile) {
+      if (!profile.is_active) {
+        await supabase.auth.signOut()
+        setSignedIn(false)
+        setAuthMessage('Bu kullanıcı hesabı pasif durumda. Yöneticiyle iletişime geçin.')
+        setLoading(false)
+        return
+      }
       setProfileName(profile.full_name)
       setRole(profile.role as Role)
     }
@@ -81,6 +94,13 @@ export default function Home() {
     ])
     setJobs((data ?? []) as Job[])
     setNotices((ns ?? []) as Notice[])
+    if (profile?.role === 'admin') {
+      const { data: ps } = await supabase.from('profiles').select('id, full_name, email, role, is_active, phone').order('full_name')
+      setProfiles((ps ?? []) as Profile[])
+    } else {
+      setProfiles([])
+      setView('jobs')
+    }
     setLoading(false)
   }
 
@@ -206,6 +226,40 @@ export default function Home() {
     await load()
   }
 
+  async function createPersonnel(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault()
+    if (!supabase || role !== 'admin') return
+    setPersonnelBusy(true); setPersonnelMessage('')
+    const fd = new FormData(e.currentTarget)
+    const { data, error } = await supabase.functions.invoke('admin-create-user', {
+      body: {
+        action: 'create',
+        full_name: String(fd.get('full_name')).trim(),
+        email: String(fd.get('email')).trim(),
+        password: String(fd.get('password')),
+        role: String(fd.get('role'))
+      }
+    })
+    setPersonnelBusy(false)
+    if (error || data?.error) return setPersonnelMessage('Personel oluşturulamadı: ' + (data?.error || error?.message || 'Bilinmeyen hata'))
+    setPersonnelMessage('Personel oluşturuldu ve girişe hazır.')
+    e.currentTarget.reset()
+    await load()
+  }
+
+  async function updatePersonnel(person: Profile, patch: Partial<Profile>) {
+    if (!supabase || role !== 'admin') return
+    setPersonnelBusy(true); setPersonnelMessage('')
+    const next = { ...person, ...patch }
+    const { data, error } = await supabase.functions.invoke('admin-create-user', {
+      body: { action: 'update', user_id: person.id, full_name: next.full_name, role: next.role, is_active: next.is_active }
+    })
+    setPersonnelBusy(false)
+    if (error || data?.error) return setPersonnelMessage('Güncelleme yapılamadı: ' + (data?.error || error?.message || 'Bilinmeyen hata'))
+    setPersonnelMessage('Personel bilgileri güncellendi.')
+    await load()
+  }
+
   function changeDemoRole(nextRole: Role) {
     setRole(nextRole)
     setProfileName(nextRole === 'service' ? 'Servis Kullanıcısı' : nextRole === 'admin' ? 'Yönetici' : 'Ofis Kullanıcısı')
@@ -249,23 +303,25 @@ export default function Home() {
       <aside className="sidebar">
         <div className="brand"><img className="brandLogo" src="/sutek-logo.png" alt="SUTEK"/><div><b>SUTEK</b><small>İş Takip Sistemi</small></div></div>
         <nav>
-          <button className={filter === 'bugun' ? 'active' : ''} onClick={() => setFilter('bugun')}>Bugünün İşleri</button>
-          <button className={filter === 'bekleyen' ? 'active' : ''} onClick={() => setFilter('bekleyen')}>Bekleyen İşler</button>
-          <button className={filter === 'tamamlanan' ? 'active' : ''} onClick={() => setFilter('tamamlanan')}>Tamamlananlar</button>
+          <button className={view === 'jobs' && filter === 'bugun' ? 'active' : ''} onClick={() => { setView('jobs'); setFilter('bugun') }}>Bugünün İşleri</button>
+          <button className={view === 'jobs' && filter === 'bekleyen' ? 'active' : ''} onClick={() => { setView('jobs'); setFilter('bekleyen') }}>Bekleyen İşler</button>
+          <button className={view === 'jobs' && filter === 'tamamlanan' ? 'active' : ''} onClick={() => { setView('jobs'); setFilter('tamamlanan') }}>Tamamlananlar</button>
+          {role === 'admin' && <button className={view === 'personnel' ? 'active' : ''} onClick={() => setView('personnel')}>Personel Yönetimi</button>}
         </nav>
         <div className="sidebarBottom"><span>{profileName}</span><small>{roleText[role]}</small>{configured && <button className="signOut" onClick={signOut}>Çıkış yap</button>}</div>
       </aside>
 
       <section className="content">
         <header className="topbar">
-          <div><h1>İş Programı</h1><p>{new Intl.DateTimeFormat('tr-TR', { dateStyle: 'full' }).format(new Date())}</p></div>
-          <div className="topActions"><button className="noticeBtn" onClick={() => setShowNotices(v => !v)}>🔔 <b>{unread}</b></button>{canCreate && <button className="primary" onClick={() => setShowForm(true)}>+ Yeni İş</button>}</div>
+          <div><h1>{view === 'personnel' ? 'Personel Yönetimi' : 'İş Programı'}</h1><p>{view === 'personnel' ? 'Ofis ve servis kullanıcılarını yönetin' : new Intl.DateTimeFormat('tr-TR', { dateStyle: 'full' }).format(new Date())}</p></div>
+          <div className="topActions"><button className="noticeBtn" onClick={() => setShowNotices(v => !v)}>🔔 <b>{unread}</b></button>{view === 'jobs' && canCreate && <button className="primary" onClick={() => setShowForm(true)}>+ Yeni İş</button>}{view === 'personnel' && role === 'admin' && <button className="primary" onClick={() => { setShowPersonnelForm(true); setPersonnelMessage('') }}>+ Personel Ekle</button>}</div>
         </header>
 
         {!configured && <div className="demoBanner"><div><b>Demo modu:</b> Veriler bu tarayıcıda saklanır. Rol değiştirerek Ofis ve Servis ekranlarını deneyebilirsiniz.</div><div className="roleSwitcher">{(['office','service','admin'] as Role[]).map(r => <button key={r} className={role === r ? 'selected' : ''} onClick={() => changeDemoRole(r)}>{roleText[r]}</button>)}</div></div>}
 
-        {showNotices && <div className="noticePanel"><div className="noticeHead"><h3>Bildirimler</h3><button onClick={markAllRead}>Tümünü okundu yap</button></div>{notices.length === 0 ? <p className="muted">Henüz bildirim yok.</p> : notices.map(n => <article key={n.id} className={n.is_read ? 'read' : ''}><span>{n.message}</span><small>{new Date(n.created_at).toLocaleString('tr-TR')}</small></article>)}</div>}
+        {showNotices && <div className="noticePanel"><div className="noticeHead"><h3>Bildirimler</h3><button onClick={markAllRead}>Tümünü okundu yap</button></div>{notices.length === 0 ? <p className="muted">Henüz bildirim yok.</p> : notices.map(n => <article key={n.id} className={n.is_read ? 'read' : ''}><b>{n.title || 'Bildirim'}</b><span>{n.message}</span><small>{new Date(n.created_at).toLocaleString('tr-TR')}</small></article>)}</div>}
 
+        {view === 'jobs' ? <>
         <div className="stats">
           <article><span>Bugünkü iş</span><strong>{jobs.filter(j => new Date(j.scheduled_at).toDateString() === today).length}</strong></article>
           <article><span>Bekleyen</span><strong>{jobs.filter(j => j.status === 'pending' || j.status === 'in_progress').length}</strong></article>
@@ -288,9 +344,20 @@ export default function Home() {
             ))}</div>
           )}
         </div>
+        </> : <div className="panel personnelPanel">
+          <div className="panelHead"><div><h2>SUTEK Personeli</h2><p className="muted personnelIntro">Kullanıcı rollerini ve hesap durumlarını buradan yönetin.</p></div><span>{profiles.length} personel</span></div>
+          {personnelMessage && <div className="personnelMessage">{personnelMessage}</div>}
+          <div className="personnelList">{profiles.map(person => <article className="personRow" key={person.id}>
+            <div className="personMain"><div className="avatar">{person.full_name?.slice(0,1).toLocaleUpperCase('tr-TR') || 'S'}</div><div><h3>{person.full_name}</h3><p>{person.email || 'E-posta bilgisi yok'}</p></div></div>
+            <div className="personControls"><label>Rol<select value={person.role} disabled={personnelBusy} onChange={e => updatePersonnel(person, { role: e.target.value as Role })}><option value="admin">Yönetici</option><option value="office">Ofis</option><option value="service">Servis</option></select></label><label className="activeToggle"><input type="checkbox" checked={person.is_active} disabled={personnelBusy} onChange={e => updatePersonnel(person, { is_active: e.target.checked })}/><span>{person.is_active ? 'Aktif' : 'Pasif'}</span></label></div>
+          </article>)}</div>
+        </div>}
       </section>
 
       {historyPhone && <div className="modalBackdrop" onMouseDown={() => setHistoryPhone(null)}><div className="modal historyModal" onMouseDown={e => e.stopPropagation()}><div className="modalHead"><div><h2>Müşteri Geçmişi</h2><p>{historyPhone} · {historyJobs.length} kayıt</p></div><button onClick={() => setHistoryPhone(null)}>×</button></div><div className="historyList">{historyJobs.map(h => <article key={h.id}><div><b>{new Date(h.scheduled_at).toLocaleString('tr-TR')}</b><span className={`badge ${h.status}`}>{statusText[h.status]}</span></div><h3>{h.customer_name}</h3><p>{h.description}</p></article>)}</div></div></div>}
+
+
+      {showPersonnelForm && role === 'admin' && <div className="modalBackdrop" onMouseDown={() => setShowPersonnelForm(false)}><div className="modal" onMouseDown={e => e.stopPropagation()}><div className="modalHead"><div><h2>Yeni Personel Ekle</h2><p>Kullanıcı hemen giriş yapabilir.</p></div><button onClick={() => setShowPersonnelForm(false)}>×</button></div><form onSubmit={createPersonnel}><label>Ad Soyad<input name="full_name" required placeholder="Ad Soyad" /></label><label>E-posta<input name="email" type="email" required placeholder="personel@sutekltd.com" /></label><label>Geçici Şifre<input name="password" type="password" minLength={6} required placeholder="En az 6 karakter" /></label><label>Rol<select name="role" defaultValue="office"><option value="office">Ofis</option><option value="service">Servis</option><option value="admin">Yönetici</option></select></label>{personnelMessage && <div className="authMessage">{personnelMessage}</div>}<div className="formActions"><button type="button" onClick={() => setShowPersonnelForm(false)}>Vazgeç</button><button className="primary" type="submit" disabled={personnelBusy}>{personnelBusy ? 'Oluşturuluyor…' : 'Personeli Oluştur'}</button></div></form></div></div>}
 
       {showForm && <div className="modalBackdrop" onMouseDown={() => setShowForm(false)}><div className="modal" onMouseDown={e => e.stopPropagation()}><div className="modalHead"><div><h2>Yeni İş Ekle</h2><p>İş servis bölümüne iletilecek.</p></div><button onClick={() => setShowForm(false)}>×</button></div><form onSubmit={createJob}><div className="grid2"><label>Tarih<input name="date" type="date" required defaultValue={localDateInputValue()} /></label><label>Saat<input name="time" type="time" required /></label></div><label>Müşteri Adı<input name="customer_name" required placeholder="Ad Soyad / Firma" /></label><label>Telefon<input name="customer_phone" required inputMode="tel" placeholder="05xx xxx xx xx" /></label><label>Yapılacak İş<textarea name="description" required rows={4} placeholder="Servisin yapacağı işi yazın…" /></label><div className="creator">Ekleyen kişi otomatik kaydedilecek: <b>{profileName}</b></div><div className="formActions"><button type="button" onClick={() => setShowForm(false)}>Vazgeç</button><button className="primary" type="submit">İşi Oluştur</button></div></form></div></div>}
     </main>

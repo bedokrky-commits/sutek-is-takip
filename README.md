@@ -24,4 +24,10 @@ npm run dev
 Sonra http://localhost:3000 adresini açın.
 
 `.env.local` dosyasında SUTEK İş Takip Supabase projesinin publishable bağlantı bilgileri hazırdır. Service role / secret anahtar içermez.
-SUTEK İş Takip Sistemi
+
+## v0.4
+- Yönetici için Personel Yönetimi ekranı
+- Güvenli Edge Function üzerinden personel oluşturma
+- Ofis / Servis / Yönetici rol yönetimi
+- Aktif / pasif kullanıcı yönetimi
+- Tekilleştirilmiş gerçek zamanlı iş bildirim akışı
