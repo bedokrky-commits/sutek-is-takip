@@ -19,6 +19,7 @@ type Job = {
 }
 type Notice = { id: string; title?: string; message: string; created_at: string; is_read: boolean; job_id?: string | null }
 type Profile = { id: string; full_name: string; email?: string | null; role: Role; is_active: boolean; phone?: string | null }
+type JobHistory = { id: string; job_id: string; new_status: Status; created_at: string; changed_by?: string | null; changer?: { full_name?: string; role?: Role } | null }
 
 const statusText: Record<Status, string> = {
   pending: 'Bekliyor',
@@ -41,6 +42,7 @@ export default function Home() {
   const [jobs, setJobs] = useState<Job[]>([])
   const [notices, setNotices] = useState<Notice[]>([])
   const [profiles, setProfiles] = useState<Profile[]>([])
+  const [jobHistory, setJobHistory] = useState<JobHistory[]>([])
   const [signedIn, setSignedIn] = useState(!configured)
   const [loading, setLoading] = useState(true)
   const [authBusy, setAuthBusy] = useState(false)
@@ -57,6 +59,8 @@ export default function Home() {
   const [showPersonnelForm, setShowPersonnelForm] = useState(false)
   const [personnelBusy, setPersonnelBusy] = useState(false)
   const [personnelMessage, setPersonnelMessage] = useState('')
+  const [reportStart, setReportStart] = useState('')
+  const [reportEnd, setReportEnd] = useState('')
 
   async function load() {
     if (!supabase) { setLoading(false); return }
@@ -78,12 +82,14 @@ export default function Home() {
       setRole(profile.role as Role)
     }
 
-    const [{ data: js }, { data: ns }] = await Promise.all([
+    const [{ data: js }, { data: ns }, { data: hs }] = await Promise.all([
       supabase.from('jobs').select('*, creator:profiles!jobs_created_by_fkey(full_name)').order('scheduled_at', { ascending: true }),
-      supabase.from('notifications').select('*').eq('user_id', user.id).order('created_at', { ascending: false }).limit(30)
+      supabase.from('notifications').select('*').eq('user_id', user.id).order('created_at', { ascending: false }).limit(30),
+      supabase.from('job_status_history').select('id,job_id,new_status,created_at,changed_by,changer:profiles!job_status_history_changed_by_fkey(full_name,role)').order('created_at', { ascending: true })
     ])
     setJobs((js ?? []) as Job[])
     setNotices((ns ?? []) as Notice[])
+    setJobHistory((hs ?? []) as JobHistory[])
 
     if (profile?.role === 'admin') {
       const { data: ps } = await supabase.from('profiles').select('id,full_name,email,role,is_active,phone').order('full_name')
@@ -185,6 +191,97 @@ export default function Home() {
     await load()
   }
 
+  function inReportRange(value: string) {
+    const d = new Date(value)
+    if (reportStart) {
+      const start = new Date(`${reportStart}T00:00:00`)
+      if (d < start) return false
+    }
+    if (reportEnd) {
+      const end = new Date(`${reportEnd}T23:59:59.999`)
+      if (d > end) return false
+    }
+    return true
+  }
+
+  function reportRangeText() {
+    if (!reportStart && !reportEnd) return 'Tüm zamanlar'
+    const start = reportStart ? new Date(`${reportStart}T00:00:00`).toLocaleDateString('tr-TR') : 'Başlangıç'
+    const end = reportEnd ? new Date(`${reportEnd}T00:00:00`).toLocaleDateString('tr-TR') : 'Bugün'
+    return `${start} - ${end}`
+  }
+
+  function downloadExcelReport() {
+    const rows = [
+      ['SUTEK İş Takip Raporu'],
+      ['Tarih Aralığı', reportRangeText()],
+      [],
+      ['Özet'],
+      ['Toplam İş', String(reportJobs.length)],
+      ['Tamamlanan', String(reportJobs.filter(j => j.status === 'completed').length)],
+      ['Ertelenen', String(reportJobs.filter(j => j.status === 'postponed').length)],
+      ['Bekleyen / İşlemde', String(reportJobs.filter(j => j.status === 'pending' || j.status === 'in_progress').length)],
+      [],
+      ['İşi Ekleyen Personel', 'Toplam', 'Tamamlanan', 'Ertelenen', 'Bekleyen'],
+      ...reportCreatorReports.map(r => [r.name, String(r.total), String(r.completed), String(r.postponed), String(r.pending)]),
+      [],
+      ['Servis Personeli', 'Tamamladı', 'Erteledi', 'Toplam İşlem'],
+      ...serviceReports.map(r => [r.name, String(r.completed), String(r.postponed), String(r.completed + r.postponed)]),
+      [],
+      ['İş Listesi'],
+      ['Tarih', 'Müşteri', 'Telefon', 'İş', 'Durum', 'Ekleyen'],
+      ...reportJobs.map(j => [
+        new Date(j.scheduled_at).toLocaleString('tr-TR'),
+        j.customer_name,
+        j.customer_phone,
+        j.description,
+        statusText[j.status],
+        j.creator?.full_name || j.created_by_name || 'Bilinmeyen'
+      ])
+    ]
+    const html = `<!doctype html><html><head><meta charset="utf-8"></head><body><table>${
+      rows.map(row => `<tr>${row.map(cell => `<td>${String(cell ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</td>`).join('')}</tr>`).join('')
+    }</table></body></html>`
+    const blob = new Blob(['\ufeff', html], { type: 'application/vnd.ms-excel;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `SUTEK-Rapor-${new Date().toISOString().slice(0,10)}.xls`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  function printPdfReport() {
+    const popup = window.open('', '_blank', 'width=1000,height=800')
+    if (!popup) return alert('PDF penceresi açılamadı. Tarayıcı açılır pencere iznini kontrol edin.')
+    const creatorRows = reportCreatorReports.map(r => `<tr><td>${r.name}</td><td>${r.total}</td><td>${r.completed}</td><td>${r.postponed}</td><td>${r.pending}</td></tr>`).join('')
+    const serviceRows = serviceReports.map(r => `<tr><td>${r.name}</td><td>${r.completed}</td><td>${r.postponed}</td><td>${r.completed + r.postponed}</td></tr>`).join('')
+    const jobRows = reportJobs.map(j => `<tr><td>${new Date(j.scheduled_at).toLocaleString('tr-TR')}</td><td>${j.customer_name}</td><td>${j.customer_phone}</td><td>${j.description}</td><td>${statusText[j.status]}</td><td>${j.creator?.full_name || j.created_by_name || 'Bilinmeyen'}</td></tr>`).join('')
+    popup.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>SUTEK Rapor</title><style>
+      body{font-family:Arial,sans-serif;color:#111;padding:28px}h1{margin:0}small{color:#666}
+      .summary{display:flex;gap:10px;flex-wrap:wrap;margin:20px 0}.summary div{border:1px solid #ddd;border-radius:8px;padding:10px 14px}
+      table{width:100%;border-collapse:collapse;margin:14px 0 28px;font-size:12px}th,td{border:1px solid #ddd;padding:7px;text-align:left}th{background:#f2f2f2}
+      h2{font-size:17px;margin-top:24px}@media print{button{display:none}body{padding:0}}
+    </style></head><body>
+      <h1>SUTEK İş Takip Raporu</h1><small>${reportRangeText()}</small>
+      <div class="summary">
+        <div><b>${reportJobs.length}</b><br>Toplam</div>
+        <div><b>${reportJobs.filter(j => j.status === 'completed').length}</b><br>Tamamlanan</div>
+        <div><b>${reportJobs.filter(j => j.status === 'postponed').length}</b><br>Ertelenen</div>
+        <div><b>${reportJobs.filter(j => j.status === 'pending' || j.status === 'in_progress').length}</b><br>Bekleyen / İşlemde</div>
+      </div>
+      <h2>İşi Ekleyen Personel</h2>
+      <table><thead><tr><th>Personel</th><th>Toplam</th><th>Tamamlanan</th><th>Ertelenen</th><th>Bekleyen</th></tr></thead><tbody>${creatorRows}</tbody></table>
+      <h2>Servis Personeli</h2>
+      <table><thead><tr><th>Servis Personeli</th><th>Tamamladı</th><th>Erteledi</th><th>Toplam İşlem</th></tr></thead><tbody>${serviceRows}</tbody></table>
+      <h2>İş Listesi</h2>
+      <table><thead><tr><th>Tarih</th><th>Müşteri</th><th>Telefon</th><th>İş</th><th>Durum</th><th>Ekleyen</th></tr></thead><tbody>${jobRows}</tbody></table>
+      <button onclick="window.print()">PDF / Yazdır</button>
+      <script>setTimeout(()=>window.print(),400)</script>
+    </body></html>`)
+    popup.document.close()
+  }
+
   async function markAllRead() {
     if (!supabase) return
     const { data: auth } = await supabase.auth.getUser()
@@ -279,8 +376,11 @@ export default function Home() {
     .filter(c => !customerSearch.trim() || `${c.name} ${c.phone}`.toLocaleLowerCase('tr-TR').includes(customerSearch.toLocaleLowerCase('tr-TR')))
     .sort((a,b) => a.name.localeCompare(b.name, 'tr'))
 
+  const reportJobs = jobs.filter(j => inReportRange(j.scheduled_at))
+  const reportHistory = jobHistory.filter(h => inReportRange(h.created_at))
+
   const creatorReportMap = new Map<string, { name: string; total: number; completed: number; postponed: number; pending: number }>()
-  for (const job of jobs) {
+  for (const job of reportJobs) {
     const name = job.creator?.full_name || job.created_by_name || 'Bilinmeyen Personel'
     const current = creatorReportMap.get(name) || { name, total: 0, completed: 0, postponed: 0, pending: 0 }
     current.total += 1
@@ -289,7 +389,19 @@ export default function Home() {
     else current.pending += 1
     creatorReportMap.set(name, current)
   }
-  const creatorReports = Array.from(creatorReportMap.values()).sort((a,b) => b.total - a.total)
+  const reportCreatorReports = Array.from(creatorReportMap.values()).sort((a,b) => b.total - a.total)
+
+  const serviceReportMap = new Map<string, { name: string; completed: number; postponed: number }>()
+  for (const h of reportHistory) {
+    if (h.changer?.role !== 'service') continue
+    if (h.new_status !== 'completed' && h.new_status !== 'postponed') continue
+    const name = h.changer?.full_name || 'Servis Personeli'
+    const current = serviceReportMap.get(name) || { name, completed: 0, postponed: 0 }
+    if (h.new_status === 'completed') current.completed += 1
+    if (h.new_status === 'postponed') current.postponed += 1
+    serviceReportMap.set(name, current)
+  }
+  const serviceReports = Array.from(serviceReportMap.values()).sort((a,b) => (b.completed + b.postponed) - (a.completed + a.postponed))
 
   const viewTitle =
     view === 'personnel' ? 'Personel Yönetimi' :
@@ -298,7 +410,7 @@ export default function Home() {
   const viewSubtitle =
     view === 'personnel' ? 'Ofis ve servis kullanıcılarını yönetin' :
     view === 'customers' ? 'Müşterilerin geçmiş iş kayıtlarını görüntüleyin' :
-    view === 'reports' ? 'İş durumu ve personel bazında özetler' :
+    view === 'reports' ? 'Tarih aralığı, servis performansı ve dışa aktarma' :
     new Intl.DateTimeFormat('tr-TR', { dateStyle: 'full' }).format(new Date())
 
   return <main className="shell">
@@ -374,18 +486,38 @@ export default function Home() {
         </div>
       : view === 'reports' && canSeeReports ?
         <>
+          <div className="reportToolbar">
+            <div className="dateFilters">
+              <label>Başlangıç<input type="date" value={reportStart} onChange={e => setReportStart(e.target.value)} /></label>
+              <label>Bitiş<input type="date" value={reportEnd} onChange={e => setReportEnd(e.target.value)} /></label>
+              {(reportStart || reportEnd) && <button onClick={() => { setReportStart(''); setReportEnd('') }}>Filtreyi Temizle</button>}
+            </div>
+            <div className="exportButtons">
+              <button onClick={downloadExcelReport}>Excel İndir</button>
+              <button className="primary" onClick={printPdfReport}>PDF Oluştur</button>
+            </div>
+          </div>
+          <div className="reportRangeLabel">{reportRangeText()}</div>
           <div className="stats">
-            <article><span>Toplam iş</span><strong>{jobs.length}</strong></article>
-            <article><span>Bekleyen / İşlemde</span><strong>{jobs.filter(j => j.status === 'pending' || j.status === 'in_progress').length}</strong></article>
-            <article><span>Tamamlanan</span><strong>{jobs.filter(j => j.status === 'completed').length}</strong></article>
-            <article><span>Ertelenen</span><strong>{jobs.filter(j => j.status === 'postponed').length}</strong></article>
+            <article><span>Toplam iş</span><strong>{reportJobs.length}</strong></article>
+            <article><span>Bekleyen / İşlemde</span><strong>{reportJobs.filter(j => j.status === 'pending' || j.status === 'in_progress').length}</strong></article>
+            <article><span>Tamamlanan</span><strong>{reportJobs.filter(j => j.status === 'completed').length}</strong></article>
+            <article><span>Ertelenen</span><strong>{reportJobs.filter(j => j.status === 'postponed').length}</strong></article>
           </div>
           <div className="panel">
-            <div className="panelHead"><div><h2>İşi Ekleyen Personel Bazında</h2><p className="muted reportIntro">Bu tablo işi sisteme ekleyen kullanıcıya göre hesaplanır.</p></div><span>{creatorReports.length} personel</span></div>
-            {creatorReports.length === 0 ? <div className="empty">Raporlanacak iş bulunmuyor.</div> :
+            <div className="panelHead"><div><h2>İşi Ekleyen Personel Bazında</h2><p className="muted reportIntro">İşi sisteme ekleyen kullanıcıya göre hesaplanır.</p></div><span>{reportCreatorReports.length} personel</span></div>
+            {reportCreatorReports.length === 0 ? <div className="empty">Raporlanacak iş bulunmuyor.</div> :
               <div className="reportTable">
                 <div className="reportRow reportHead"><span>Personel</span><span>Toplam</span><span>Tamamlanan</span><span>Ertelenen</span><span>Bekleyen</span></div>
-                {creatorReports.map(r => <div className="reportRow" key={r.name}><b>{r.name}</b><span>{r.total}</span><span>{r.completed}</span><span>{r.postponed}</span><span>{r.pending}</span></div>)}
+                {reportCreatorReports.map(r => <div className="reportRow" key={r.name}><b>{r.name}</b><span>{r.total}</span><span>{r.completed}</span><span>{r.postponed}</span><span>{r.pending}</span></div>)}
+              </div>}
+          </div>
+          <div className="panel serviceReportPanel">
+            <div className="panelHead"><div><h2>Servis Personeli Performansı</h2><p className="muted reportIntro">Servis kullanıcısının yaptığı gerçek durum değişikliklerinden hesaplanır.</p></div><span>{serviceReports.length} servis</span></div>
+            {serviceReports.length === 0 ? <div className="empty">Bu tarih aralığında servis işlemi bulunmuyor.</div> :
+              <div className="reportTable">
+                <div className="serviceReportRow reportHead"><span>Servis Personeli</span><span>Tamamladı</span><span>Erteledi</span><span>Toplam İşlem</span></div>
+                {serviceReports.map(r => <div className="serviceReportRow" key={r.name}><b>{r.name}</b><span>{r.completed}</span><span>{r.postponed}</span><span>{r.completed + r.postponed}</span></div>)}
               </div>}
           </div>
         </>
