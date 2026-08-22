@@ -125,6 +125,24 @@ export default function Home() {
   const [personnelMessage, setPersonnelMessage] = useState('')
   const [reportStart, setReportStart] = useState('')
   const [reportEnd, setReportEnd] = useState('')
+  const [historyPage, setHistoryPage] = useState(1)
+  const [jobCreateBusy, setJobCreateBusy] = useState(false)
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null)
+  const [isOnline, setIsOnline] = useState(true)
+
+  function showMessage(message: string, type: 'success' | 'error' | 'info' = 'info') {
+    setToast({ message, type })
+    window.setTimeout(() => setToast(null), type === 'error' ? 5200 : 3200)
+  }
+
+  function friendlyError(error: unknown, fallback = 'İşlem tamamlanamadı.') {
+    const raw = error instanceof Error ? error.message : String(error || '')
+    if (!raw) return fallback
+    if (raw.includes('Failed to fetch') || raw.includes('NetworkError')) return 'Sunucuya ulaşılamadı. İnternet bağlantınızı kontrol edin.'
+    if (raw.includes('JWT') || raw.includes('session') || raw.includes('Oturum')) return 'Oturumunuz yenilenemedi. Lütfen çıkış yapıp tekrar giriş yapın.'
+    if (raw.includes('permission') || raw.includes('policy') || raw.includes('403')) return 'Bu işlem için yetkiniz bulunmuyor.'
+    return raw
+  }
 
   async function load() {
     if (!supabase) { setLoading(false); return }
@@ -287,6 +305,21 @@ export default function Home() {
     }
   }, [supabase, signedIn])
 
+  useEffect(() => {
+    const updateConnection = () => {
+      const online = navigator.onLine
+      setIsOnline(online)
+      if (online) showMessage('Bağlantı yeniden kuruldu.', 'success')
+    }
+    setIsOnline(navigator.onLine)
+    window.addEventListener('online', updateConnection)
+    window.addEventListener('offline', updateConnection)
+    return () => {
+      window.removeEventListener('online', updateConnection)
+      window.removeEventListener('offline', updateConnection)
+    }
+  }, [])
+
   async function signIn(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
     if (!supabase) return
@@ -309,12 +342,16 @@ export default function Home() {
 
   async function createJob(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
-    if (!supabase) return
+    if (!supabase || jobCreateBusy) return
+    setJobCreateBusy(true)
     const form = e.currentTarget
     const fd = new FormData(form)
     const scheduled = new Date(`${fd.get('date')}T${fd.get('time')}`)
     const { data: auth } = await supabase.auth.getUser()
-    if (!auth.user) return
+    if (!auth.user) {
+      setJobCreateBusy(false)
+      return showMessage('Oturum bulunamadı. Lütfen tekrar giriş yapın.', 'error')
+    }
     const { data, error } = await supabase.from('jobs').insert({
       scheduled_at: scheduled.toISOString(),
       customer_name: String(fd.get('customer_name')).trim(),
@@ -326,7 +363,7 @@ export default function Home() {
       repeat_months: Number(fd.get('repeat_months') || 0) || null,
       created_by: auth.user.id
     }).select('*, creator:profiles!jobs_created_by_fkey(full_name), assignee:profiles!jobs_assigned_to_fkey(full_name)').single()
-    if (error) return alert(error.message)
+    return showMessage(friendlyError(error.message), 'error')
 
     if (data) {
       const newJob = data as Job
@@ -337,6 +374,8 @@ export default function Home() {
     }
     setShowForm(false)
     form.reset()
+    setJobCreateBusy(false)
+    showMessage('İş programa eklendi.', 'success')
   }
 
   async function setStatus(job: Job, status: Status) {
@@ -356,7 +395,7 @@ export default function Home() {
 
     if (error) {
       setJobs(current => current.map(j => j.id === job.id ? previous : j))
-      return alert(error.message)
+      return showMessage(friendlyError(error.message), 'error')
     }
     if (data) setJobs(current => current.map(j => j.id === job.id ? data as Job : j))
   }
@@ -366,11 +405,11 @@ export default function Home() {
     const date = prompt('Yeni tarih ve saat (YYYY-MM-DD HH:MM)')
     if (!date) return
     const parsed = new Date(date.replace(' ', 'T'))
-    if (Number.isNaN(parsed.getTime())) return alert('Geçerli tarih-saat girin.')
+    return showMessage(friendlyError('Geçerli tarih-saat girin.'), 'error')
     const { data, error } = await supabase.functions.invoke('office-reschedule-job', {
       body: { job_id: job.id, scheduled_at: parsed.toISOString() }
     })
-    if (error || data?.error) return alert(data?.error || error?.message || 'Tarih güncellenemedi.')
+    return showMessage(friendlyError(data?.error || error?.message || 'Tarih güncellenemedi.'), 'error')
     const { data: updated } = await supabase.from('jobs')
       .select('*, creator:profiles!jobs_created_by_fkey(full_name), assignee:profiles!jobs_assigned_to_fkey(full_name)')
       .eq('id', job.id).single()
@@ -395,7 +434,7 @@ export default function Home() {
         repeat_months: Number(fd.get('repeat_months') || 0) || null
       }
     })
-    if (error || data?.error) return alert(data?.error || error?.message || 'İş düzenlenemedi.')
+    return showMessage(friendlyError(data?.error || error?.message || 'İş düzenlenemedi.'), 'error')
     const editedId = editJob.id
     setEditJob(null)
     const { data: updated } = await supabase.from('jobs')
@@ -427,15 +466,15 @@ export default function Home() {
     input.onchange = async () => {
       const file = input.files?.[0]
       if (!file) return
-      if (file.size > 10 * 1024 * 1024) return alert('Dosya en fazla 10 MB olabilir.')
+      return showMessage(friendlyError('Dosya en fazla 10 MB olabilir.'), 'error')
       setFileBusy(true)
       try {
         const { data: auth } = await supabase.auth.getUser()
-        if (!auth.user) return alert('Oturum bulunamadı.')
+        return showMessage(friendlyError('Oturum bulunamadı.'), 'error')
         const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_')
         const path = `${auth.user.id}/${job.id}/${Date.now()}-${safeName}`
         const { error: uploadError } = await supabase.storage.from('job-files').upload(path, file, { upsert: false })
-        if (uploadError) return alert('Dosya yüklenemedi: ' + uploadError.message)
+        return showMessage(friendlyError('Dosya yüklenemedi: ' + uploadError.message), 'error')
         const { error: rowError } = await supabase.from('job_attachments').insert({
           job_id: job.id,
           file_name: file.name,
@@ -446,7 +485,7 @@ export default function Home() {
         })
         if (rowError) {
           await supabase.storage.from('job-files').remove([path])
-          return alert('Dosya kaydı oluşturulamadı: ' + rowError.message)
+          return showMessage(friendlyError('Dosya kaydı oluşturulamadı: ' + rowError.message), 'error')
         }
         const { data: createdFile } = await supabase.from('job_attachments')
           .select('id,job_id,file_name,storage_path,mime_type,file_size,created_at')
@@ -463,7 +502,7 @@ export default function Home() {
   async function openAttachment(file: Attachment) {
     if (!supabase) return
     const { data, error } = await supabase.storage.from('job-files').createSignedUrl(file.storage_path, 60 * 10)
-    if (error || !data?.signedUrl) return alert('Dosya açılamadı.')
+    return showMessage(friendlyError('Dosya açılamadı.'), 'error')
     window.open(data.signedUrl, '_blank', 'noopener,noreferrer')
   }
 
@@ -471,9 +510,9 @@ export default function Home() {
     if (!supabase) return
     if (!confirm(`${file.file_name} dosyasını silmek istediğinize emin misiniz?`)) return
     const { error: storageError } = await supabase.storage.from('job-files').remove([file.storage_path])
-    if (storageError) return alert('Dosya silinemedi: ' + storageError.message)
+    return showMessage(friendlyError('Dosya silinemedi: ' + storageError.message), 'error')
     const { error } = await supabase.from('job_attachments').delete().eq('id', file.id)
-    if (error) return alert('Dosya kaydı silinemedi: ' + error.message)
+    return showMessage(friendlyError('Dosya kaydı silinemedi: ' + error.message), 'error')
     setAttachments(current => current.filter(a => a.id !== file.id))
   }
 
@@ -492,8 +531,8 @@ export default function Home() {
 
     const workPerformed = workPerformedDraft.trim()
     const customerReport = reportDraft.trim()
-    if (!workPerformed) return alert('Yapılan işlem alanı boş olamaz.')
-    if (!customerReport) return alert('Müşteriye gönderilecek rapor boş olamaz.')
+    return showMessage(friendlyError('Yapılan işlem alanı boş olamaz.'), 'error')
+    return showMessage(friendlyError('Müşteriye gönderilecek rapor boş olamaz.'), 'error')
 
     setReportBusy(true)
     const { data: auth } = await supabase.auth.getUser()
@@ -517,7 +556,7 @@ export default function Home() {
 
     if (reportError) {
       setReportBusy(false)
-      return alert('Servis formu kaydedilemedi: ' + reportError.message)
+      return showMessage(friendlyError('Servis formu kaydedilemedi: ' + reportError.message), 'error')
     }
 
     const jobPatch: Record<string, string> = {
@@ -538,7 +577,7 @@ export default function Home() {
       .single()
 
     setReportBusy(false)
-    if (jobError) return alert('İş güncellenemedi: ' + jobError.message)
+    return showMessage(friendlyError('İş güncellenemedi: ' + jobError.message), 'error')
 
     if (savedReport) {
       const sr = savedReport as ServiceReport
@@ -573,10 +612,10 @@ export default function Home() {
   async function printServiceForm(job: Job) {
     if (!supabase) return
     const serviceReport = serviceReports.find(r => r.job_id === job.id)
-    if (!serviceReport) return alert('Bu iş için henüz servis formu oluşturulmamış.')
+    return showMessage(friendlyError('Bu iş için henüz servis formu oluşturulmamış.'), 'error')
 
     const popup = window.open('', '_blank', 'width=1000,height=850')
-    if (!popup) return alert('PDF penceresi açılamadı. Tarayıcı açılır pencere iznini kontrol edin.')
+    return showMessage(friendlyError('PDF penceresi açılamadı. Tarayıcı açılır pencere iznini kontrol edin.'), 'error')
 
     popup.document.write('<html><body style="font-family:Arial,sans-serif;padding:30px">Servis formu hazırlanıyor…</body></html>')
 
@@ -631,7 +670,7 @@ export default function Home() {
 
   function openNavigation(provider: 'google' | 'apple' | 'yandex', address?: string | null) {
     const value = (address || '').trim()
-    if (!value) return alert('Bu iş için adres girilmemiş.')
+    return showMessage(friendlyError('Bu iş için adres girilmemiş.'), 'error')
     const query = encodeURIComponent(value)
     const urls = {
       google: `https://www.google.com/maps/search/?api=1&query=${query}`,
@@ -644,7 +683,7 @@ export default function Home() {
 
   function whatsappCustomerReport(job: Job) {
     const report = (job.customer_report || '').trim()
-    if (!report) return alert('Bu iş için henüz müşteri raporu yazılmamış.')
+    return showMessage(friendlyError('Bu iş için henüz müşteri raporu yazılmamış.'), 'error')
     let phone = job.customer_phone.replace(/\D/g, '')
     if (phone.startsWith('0')) phone = '90' + phone.slice(1)
     else if (phone.startsWith('5')) phone = '90' + phone
@@ -658,7 +697,7 @@ export default function Home() {
     const { data, error } = await supabase.functions.invoke('delete-job', {
       body: { job_id: job.id }
     })
-    if (error || data?.error) return alert(data?.error || error?.message || 'İş silinemedi.')
+    return showMessage(friendlyError(data?.error || error?.message || 'İş silinemedi.'), 'error')
     if (historyPhone === job.customer_phone) setHistoryPhone(null)
     setJobs(current => current.filter(j => j.id !== job.id))
     setAttachments(current => current.filter(a => a.job_id !== job.id))
@@ -726,7 +765,7 @@ export default function Home() {
 
   function printPdfReport() {
     const popup = window.open('', '_blank', 'width=1000,height=800')
-    if (!popup) return alert('PDF penceresi açılamadı. Tarayıcı açılır pencere iznini kontrol edin.')
+    return showMessage(friendlyError('PDF penceresi açılamadı. Tarayıcı açılır pencere iznini kontrol edin.'), 'error')
     const creatorRows = reportCreatorReports.map(r => `<tr><td>${r.name}</td><td>${r.total}</td><td>${r.completed}</td><td>${r.postponed}</td><td>${r.pending}</td></tr>`).join('')
     const serviceRows = servicePerformanceReports.map(r => `<tr><td>${r.name}</td><td>${r.completed}</td><td>${r.postponed}</td><td>${r.completed + r.postponed}</td></tr>`).join('')
     const jobRows = reportJobs.map(j => `<tr><td>${new Date(j.scheduled_at).toLocaleString('tr-TR')}</td><td>${j.customer_name}</td><td>${j.customer_phone}</td><td>${j.description}</td><td>${statusText[j.status]}</td><td>${j.creator?.full_name || j.created_by_name || 'Bilinmeyen'}</td></tr>`).join('')
@@ -765,7 +804,7 @@ export default function Home() {
       author_id: auth.user.id,
       message
     }).select('id,job_id,author_id,message,created_at,author:profiles!job_comments_author_id_fkey(full_name,role)').single()
-    if (error) return alert('Not eklenemedi: ' + error.message)
+    return showMessage(friendlyError('Not eklenemedi: ' + error.message), 'error')
     if (data) setJobComments(current => current.some(c => c.id === data.id) ? current : [...current, data as JobComment])
     setCommentDraft('')
   }
@@ -774,7 +813,7 @@ export default function Home() {
     if (!supabase) return
     if (!confirm('Bu notu silmek istediğinize emin misiniz?')) return
     const { error } = await supabase.from('job_comments').delete().eq('id', comment.id)
-    if (error) return alert('Not silinemedi: ' + error.message)
+    return showMessage(friendlyError('Not silinemedi: ' + error.message), 'error')
     setJobComments(current => current.filter(c => c.id !== comment.id))
   }
 
@@ -821,17 +860,17 @@ export default function Home() {
     if (!signer) return
     const canvas = signatureCanvasRef.current
     const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png'))
-    if (!blob) return alert('İmza oluşturulamadı.')
+    return showMessage(friendlyError('İmza oluşturulamadı.'), 'error')
     const { data: auth } = await supabase.auth.getUser()
     if (!auth.user) return
     const path = `${auth.user.id}/${signatureJob.id}/signature-${Date.now()}.png`
     const { error: uploadError } = await supabase.storage.from('job-files').upload(path, blob, { contentType: 'image/png' })
-    if (uploadError) return alert('İmza yüklenemedi: ' + uploadError.message)
+    return showMessage(friendlyError('İmza yüklenemedi: ' + uploadError.message), 'error')
     if (signatureJob.signature_path) await supabase.storage.from('job-files').remove([signatureJob.signature_path])
     const signedAt = new Date().toISOString()
     const { data, error } = await supabase.from('jobs').update({ signature_path: path, signature_name: signer, signed_at: signedAt }).eq('id', signatureJob.id)
       .select('*, creator:profiles!jobs_created_by_fkey(full_name), assignee:profiles!jobs_assigned_to_fkey(full_name)').single()
-    if (error) return alert('İmza kaydedilemedi: ' + error.message)
+    return showMessage(friendlyError('İmza kaydedilemedi: ' + error.message), 'error')
     if (data) setJobs(current => current.map(j => j.id === signatureJob.id ? data as Job : j))
     setSignatureJob(null)
   }
@@ -852,10 +891,10 @@ export default function Home() {
       repeat_months: source.repeat_months || null,
       created_by: auth.user.id
     }).select('*, creator:profiles!jobs_created_by_fkey(full_name), assignee:profiles!jobs_assigned_to_fkey(full_name)').single()
-    if (error) return alert('Bakım işi oluşturulamadı: ' + error.message)
+    return showMessage(friendlyError('Bakım işi oluşturulamadı: ' + error.message), 'error')
     await supabase.from('jobs').update({ next_maintenance_at: null }).eq('id', source.id)
     if (data) setJobs(current => [...current.map(j => j.id === source.id ? { ...j, next_maintenance_at: null } : j), data as Job].sort((a,b)=>+new Date(a.scheduled_at)-+new Date(b.scheduled_at)))
-    alert('Periyodik bakım işi oluşturuldu.')
+    showMessage('Periyodik bakım işi oluşturuldu.', 'success')
   }
 
   async function markAllRead() {
@@ -912,6 +951,10 @@ export default function Home() {
     setPersonnelMessage('Kullanıcı silindi.')
     await load()
   }
+
+  useEffect(() => {
+    setHistoryPage(1)
+  }, [historyPhone])
 
   if (configured && !signedIn && !loading) {
     return <main className="authShell">
@@ -982,6 +1025,10 @@ export default function Home() {
   })
 
   const historyJobs = historyPhone ? jobs.filter(j => j.customer_phone === historyPhone).sort((a,b) => +new Date(b.scheduled_at) - +new Date(a.scheduled_at)) : []
+  const historyPageSize = 5
+  const historyTotalPages = Math.max(1, Math.ceil(historyJobs.length / historyPageSize))
+  const safeHistoryPage = Math.min(historyPage, historyTotalPages)
+  const pagedHistoryJobs = historyJobs.slice((safeHistoryPage - 1) * historyPageSize, safeHistoryPage * historyPageSize)
   const canCreate = role === 'office' || role === 'admin'
   const canOperate = role === 'service' || role === 'admin'
   const canSchedule = role === 'office' || role === 'admin'
@@ -1072,6 +1119,8 @@ export default function Home() {
     new Intl.DateTimeFormat('tr-TR', { dateStyle: 'full' }).format(new Date())
 
   return <main className="shell">
+    {!isOnline && <div className="connectionBanner">İnternet bağlantısı yok. Değişiklikler bağlantı geri geldiğinde tekrar denenebilir.</div>}
+    {toast && <div className={`appToast ${toast.type}`}>{toast.message}</div>}
     <aside className="sidebar">
       <div className="brand"><img className="brandLogo" src="/sutek-logo.png" alt="SUTEK"/><div><b>SUTEK</b><small>İş Takip Sistemi</small></div></div>
       <nav>
@@ -1373,7 +1422,7 @@ export default function Home() {
       </div>
     </div>}
 
-    {historyPhone && <div className="modalBackdrop" onMouseDown={() => setHistoryPhone(null)}><div className="modal historyModal serviceHistoryModal" onMouseDown={e => e.stopPropagation()}><div className="modalHead"><div><h2>Müşteri Kartı</h2><p>{historyPhone} · {historyJobs.length} servis kaydı</p></div><button onClick={() => setHistoryPhone(null)}>×</button></div>{historyJobs.length>0 && <div className="customerCardSummary"><div><span>Müşteri</span><b>{historyJobs[0].customer_name}</b></div><div><span>Telefon</span><b>{historyPhone}</b></div><div><span>Adresler</span><b>{Array.from(new Set(historyJobs.map(j=>j.customer_address).filter(Boolean))).length}</b></div><div><span>Toplam Servis</span><b>{historyJobs.length}</b></div><div><span>Son Servis</span><b>{new Date(historyJobs[0].scheduled_at).toLocaleDateString('tr-TR')}</b></div><div><span>Sonraki Bakım</span><b>{historyJobs.find(j=>j.next_maintenance_at)?.next_maintenance_at ? new Date(historyJobs.find(j=>j.next_maintenance_at)!.next_maintenance_at!).toLocaleDateString('tr-TR') : '-'}</b></div></div>}<div className="historyList">{historyJobs.map(h => {
+    {historyPhone && <div className="modalBackdrop" onMouseDown={() => setHistoryPhone(null)}><div className="modal historyModal serviceHistoryModal" onMouseDown={e => e.stopPropagation()}><div className="modalHead"><div><h2>Müşteri Kartı</h2><p>{historyPhone} · {historyJobs.length} servis kaydı</p></div><button onClick={() => setHistoryPhone(null)}>×</button></div>{historyJobs.length>0 && <div className="customerCardSummary"><div><span>Müşteri</span><b>{historyJobs[0].customer_name}</b></div><div><span>Telefon</span><b>{historyPhone}</b></div><div><span>Adresler</span><b>{Array.from(new Set(historyJobs.map(j=>j.customer_address).filter(Boolean))).length}</b></div><div><span>Toplam Servis</span><b>{historyJobs.length}</b></div><div><span>Son Servis</span><b>{new Date(historyJobs[0].scheduled_at).toLocaleDateString('tr-TR')}</b></div><div><span>Sonraki Bakım</span><b>{historyJobs.find(j=>j.next_maintenance_at)?.next_maintenance_at ? new Date(historyJobs.find(j=>j.next_maintenance_at)!.next_maintenance_at!).toLocaleDateString('tr-TR') : '-'}</b></div></div>}<div className="historyList">{pagedHistoryJobs.map(h => {
       const sr = serviceReports.find(r => r.job_id === h.id)
       const fileCount = attachments.filter(a => a.job_id === h.id).length
       return <article key={h.id} className="serviceHistoryCard">
@@ -1392,10 +1441,16 @@ export default function Home() {
           {fileCount > 0 && <button onClick={() => setFilesJob(h)}>Dosyalar ({fileCount})</button>}
         </div>
       </article>
-    })}</div></div></div>}
+    })}</div>
+    {historyJobs.length > historyPageSize && <div className="historyPagination">
+      <button disabled={safeHistoryPage <= 1} onClick={() => setHistoryPage(p => Math.max(1, p - 1))}>← Önceki</button>
+      <span>{safeHistoryPage} / {historyTotalPages}</span>
+      <button disabled={safeHistoryPage >= historyTotalPages} onClick={() => setHistoryPage(p => Math.min(historyTotalPages, p + 1))}>Sonraki →</button>
+    </div>}
+    </div></div>}
 
     {showPersonnelForm && role === 'admin' && <div className="modalBackdrop" onMouseDown={() => setShowPersonnelForm(false)}><div className="modal" onMouseDown={e => e.stopPropagation()}><div className="modalHead"><div><h2>Yeni Personel Ekle</h2><p>Kullanıcı hemen giriş yapabilir.</p></div><button onClick={() => setShowPersonnelForm(false)}>×</button></div><form onSubmit={createPersonnel}><label>Ad Soyad<input name="full_name" required /></label><label>E-posta<input name="email" type="email" required /></label><label>Geçici Şifre<input name="password" type="password" minLength={6} required /></label><label>Rol<select name="role" defaultValue="office"><option value="office">Ofis</option><option value="service">Servis</option><option value="admin">Yönetici</option></select></label>{personnelMessage && <div className="authMessage">{personnelMessage}</div>}<div className="formActions"><button type="button" onClick={() => setShowPersonnelForm(false)}>Vazgeç</button><button className="primary" type="submit" disabled={personnelBusy}>{personnelBusy ? 'Oluşturuluyor…' : 'Personeli Oluştur'}</button></div></form></div></div>}
 
-    {showForm && <div className="modalBackdrop" onMouseDown={() => setShowForm(false)}><div className="modal" onMouseDown={e => e.stopPropagation()}><div className="modalHead"><div><h2>Yeni İş Ekle</h2><p>İş servis bölümüne iletilecek.</p></div><button onClick={() => setShowForm(false)}>×</button></div><form onSubmit={createJob}><div className="grid2"><label>Tarih<input name="date" type="date" required defaultValue={localDateInputValue()} /></label><label>Saat<input name="time" type="time" required /></label></div><label>Müşteri Adı<input name="customer_name" required /></label><label>Telefon<input name="customer_phone" required inputMode="tel" /></label><label>Adres (isteğe bağlı)<input name="customer_address" placeholder="Servisin gideceği adres" /></label><label>Yapılacak İş<textarea name="description" required rows={4} /></label><div className="grid2"><label>Periyodik Bakım<select name="repeat_months" defaultValue=""><option value="">Tek seferlik</option><option value="1">Her 1 ay</option><option value="3">Her 3 ay</option><option value="6">Her 6 ay</option><option value="12">Her 12 ay</option><option value="24">Her 24 ay</option></select></label><label>Öncelik<select name="priority" defaultValue="normal"><option value="normal">Normal</option><option value="urgent">Acil</option></select></label><label>Servis Personeli<select name="assigned_to" defaultValue=""><option value="">Atama yok</option>{serviceProfiles.map(p => <option key={p.id} value={p.id}>{p.full_name}</option>)}</select></label></div><div className="creator">Ekleyen kişi otomatik kaydedilecek: <b>{profileName}</b></div><div className="formActions"><button type="button" onClick={() => setShowForm(false)}>Vazgeç</button><button className="primary" type="submit">İşi Oluştur</button></div></form></div></div>}
+    {showForm && <div className="modalBackdrop" onMouseDown={() => setShowForm(false)}><div className="modal" onMouseDown={e => e.stopPropagation()}><div className="modalHead"><div><h2>Yeni İş Ekle</h2><p>İş servis bölümüne iletilecek.</p></div><button onClick={() => setShowForm(false)}>×</button></div><form onSubmit={createJob}><div className="grid2"><label>Tarih<input name="date" type="date" required defaultValue={localDateInputValue()} /></label><label>Saat<input name="time" type="time" required /></label></div><label>Müşteri Adı<input name="customer_name" required /></label><label>Telefon<input name="customer_phone" required inputMode="tel" /></label><label>Adres (isteğe bağlı)<input name="customer_address" placeholder="Servisin gideceği adres" /></label><label>Yapılacak İş<textarea name="description" required rows={4} /></label><div className="grid2"><label>Periyodik Bakım<select name="repeat_months" defaultValue=""><option value="">Tek seferlik</option><option value="1">Her 1 ay</option><option value="3">Her 3 ay</option><option value="6">Her 6 ay</option><option value="12">Her 12 ay</option><option value="24">Her 24 ay</option></select></label><label>Öncelik<select name="priority" defaultValue="normal"><option value="normal">Normal</option><option value="urgent">Acil</option></select></label><label>Servis Personeli<select name="assigned_to" defaultValue=""><option value="">Atama yok</option>{serviceProfiles.map(p => <option key={p.id} value={p.id}>{p.full_name}</option>)}</select></label></div><div className="creator">Ekleyen kişi otomatik kaydedilecek: <b>{profileName}</b></div><div className="formActions"><button type="button" onClick={() => setShowForm(false)}>Vazgeç</button><button className="primary" type="submit" disabled={jobCreateBusy}>{jobCreateBusy ? 'Ekleniyor…' : 'İşi Oluştur'}</button></div></form></div></div>}
   </main>
 }

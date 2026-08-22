@@ -59,3 +59,102 @@
 .customerCardSummary{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px}.customerCardSummary div{background:#f7f8fa;border-radius:10px;padding:10px}.customerCardSummary span{display:block;font-size:9px;text-transform:uppercase;color:#6b7280;margin-bottom:4px}.customerCardSummary b{font-size:12px}
 @media(max-width:950px){.dashboardCards{grid-template-columns:repeat(2,1fr)}.dashboardGrid{grid-template-columns:1fr}.calendarGrid.month,.calendarGrid.week{min-width:850px}.calendarPanel{overflow:auto}.maintenanceList article{grid-template-columns:1fr}.maintenanceActions{justify-content:flex-start}.customerCardSummary{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:600px){.dashboardCards{grid-template-columns:1fr 1fr}.weekSummary{grid-template-columns:repeat(4,1fr)}.commentComposer{grid-template-columns:1fr}.customerCardSummary{grid-template-columns:1fr 1fr}.calendarToolbar{align-items:flex-start;flex-direction:column}}
+
+/* v1.5 stability, mobile and usability */
+.connectionBanner{position:fixed;left:50%;top:10px;transform:translateX(-50%);z-index:1200;background:#7f1d1d;color:#fff;border-radius:10px;padding:9px 14px;font-size:12px;box-shadow:0 8px 24px rgba(0,0,0,.18)}
+.appToast{position:fixed;right:18px;top:18px;z-index:1300;max-width:min(420px,calc(100vw - 36px));padding:11px 14px;border-radius:11px;background:#111827;color:#fff;font-size:12px;box-shadow:0 10px 28px rgba(0,0,0,.2)}
+.appToast.success{background:#166534}.appToast.error{background:#991b1b}.appToast.info{background:#1f2937}
+.historyPagination{display:flex;align-items:center;justify-content:center;gap:10px;padding:14px;border-top:1px solid #edf0f2}
+.historyPagination button{border:1px solid #d9dde4;background:#fff;border-radius:8px;padding:7px 11px}.historyPagination button:disabled{opacity:.4;cursor:not-allowed}.historyPagination span{font-size:11px;color:#6b7280}
+button:disabled{opacity:.55;cursor:not-allowed}
+
+/* keep secondary job actions visually quieter */
+.actions button,.actions .actionLink{min-height:34px}
+.actions .success{font-weight:700}
+.jobInfo p{overflow-wrap:anywhere}
+.customerRow,.personRow,.job{content-visibility:auto;contain-intrinsic-size:100px}
+
+/* compact dashboard on medium screens */
+@media(max-width:1100px){
+  .dashboardCards{grid-template-columns:repeat(2,1fr)}
+  .dashboardGrid{grid-template-columns:1fr}
+  .weekSummary{grid-template-columns:repeat(4,1fr)}
+}
+
+/* phone-first layout */
+@media(max-width:700px){
+  body{overflow-x:hidden}
+  .content{padding:12px!important}
+  .topbar{gap:10px;align-items:flex-start}
+  .topbar h1{font-size:20px!important}
+  .topbar p{font-size:11px!important}
+  .topActions{gap:6px;flex-wrap:wrap;justify-content:flex-end}
+  .topActions .primary{padding:9px 11px!important}
+  .stats{grid-template-columns:repeat(2,1fr)!important;gap:8px!important}
+  .stats article{padding:12px!important}
+  .stats strong{font-size:23px!important}
+
+  .panel{border-radius:12px!important}
+  .panelHead{padding:13px!important}
+  .searchInput{width:100%!important;min-width:0!important}
+  .quickFilters{width:100%;overflow-x:auto;flex-wrap:nowrap;padding-bottom:3px;-webkit-overflow-scrolling:touch}
+  .quickFilters button{white-space:nowrap}
+
+  .job{grid-template-columns:1fr!important;gap:9px!important;padding:13px!important}
+  .job .time{display:flex!important;gap:8px;align-items:center!important;justify-content:flex-start!important}
+  .job .time strong{font-size:18px!important}
+  .job .time small{margin:0!important}
+  .jobTitle{align-items:flex-start!important;flex-wrap:wrap!important}
+  .jobTitle h3{width:100%;font-size:16px!important}
+  .jobMeta{gap:6px!important}
+  .jobMeta small{font-size:10px!important}
+  .actions{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px!important;width:100%}
+  .actions button,.actions .actionLink{width:100%;justify-content:center;text-align:center;display:flex;align-items:center;min-height:40px;padding:8px 6px!important;font-size:11px!important}
+  .actions .success,.actions .primary,.actions .warning,.actions .dangerBtn{font-weight:700}
+  .roleHint{grid-column:1/-1}
+
+  .serviceOpsSummary,.serviceStatusPanel{padding:13px!important}
+  .serviceOpsCards{grid-template-columns:repeat(2,1fr)!important}
+  .serviceStatusGrid article>div{grid-template-columns:repeat(2,1fr)!important}
+
+  .customerCardSummary{grid-template-columns:repeat(2,1fr)!important}
+  .customerRow{padding:13px!important}
+  .customerStats{gap:5px!important}
+  .customerStats span{padding:6px 8px!important;font-size:10px!important}
+
+  .modalBackdrop{padding:8px!important;align-items:flex-end!important}
+  .modal{width:100%!important;max-height:92vh!important;overflow:auto!important;border-radius:16px 16px 0 0!important}
+  .modalHead{position:sticky;top:0;background:#fff;z-index:2;padding-bottom:10px}
+  .formActions{position:sticky;bottom:0;background:#fff;padding-top:10px;z-index:2;box-shadow:0 -8px 16px rgba(255,255,255,.9)}
+  .grid2{grid-template-columns:1fr!important}
+
+  .calendarToolbar{flex-wrap:wrap!important;padding:10px!important}
+  .calendarGrid.month,.calendarGrid.week{min-width:760px}
+  .calendarPanel{overflow-x:auto}
+  .calendarDay{min-height:105px!important}
+  .calendarGrid.week .calendarDay{min-height:330px!important}
+
+  .dashboardCards{grid-template-columns:repeat(2,1fr)!important;gap:8px!important}
+  .dashboardCards article{padding:12px!important}
+  .dashboardCards strong{font-size:22px!important}
+  .dashboardGrid{grid-template-columns:1fr!important}
+  .weekSummary{grid-template-columns:repeat(2,1fr)!important}
+
+  .maintenanceList article{grid-template-columns:1fr!important;gap:9px!important;padding:13px!important}
+  .maintenanceActions{flex-wrap:wrap!important}
+  .reportTable{overflow-x:auto}
+  .reportToolbar{padding:12px!important}
+  .exportButtons{width:100%}
+  .exportButtons button{flex:1}
+
+  .historyPagination{position:sticky;bottom:0;background:#fff;z-index:2}
+  .appToast{top:auto;bottom:18px;left:12px;right:12px;max-width:none;text-align:center}
+  .connectionBanner{top:8px;width:calc(100% - 24px);text-align:center}
+}
+
+/* extra-small phones */
+@media(max-width:430px){
+  .dashboardCards,.stats{grid-template-columns:1fr 1fr!important}
+  .actions{grid-template-columns:1fr 1fr!important}
+  .customerCardSummary{grid-template-columns:1fr!important}
+}
