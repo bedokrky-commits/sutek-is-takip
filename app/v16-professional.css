@@ -548,3 +548,29 @@ button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible,
     overflow-y:auto;
   }
 }
+
+
+/* v1.7.2 — Desktop Other Actions visibility fix */
+@media(min-width:561px){
+  .moreActions{
+    position:relative;
+    z-index:80;
+  }
+  .moreActions[open]{
+    z-index:999;
+  }
+  .moreActionsMenu{
+    top:auto;
+    bottom:calc(100% + 7px);
+    right:0;
+    left:auto;
+    max-height:min(430px,70vh);
+    overflow-y:auto;
+    z-index:1000;
+  }
+  .jobsPanel,
+  .jobsPanel .jobList,
+  .jobsPanel .job{
+    overflow:visible!important;
+  }
+}
