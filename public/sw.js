@@ -1,10 +1,10 @@
-const CACHE_NAME = 'sutek-pwa-v24';
+const CACHE_NAME = 'sutek-pwa-v242';
 const STATIC_ASSETS = [
-  '/manifest.webmanifest',
   '/offline.html',
-  '/icons/icon-192.png',
-  '/icons/icon-512.png',
-  '/icons/apple-touch-icon.png'
+  '/icons/sutek-app-192-v242.png',
+  '/icons/sutek-app-512-v242.png',
+  '/icons/sutek-maskable-512-v242.png',
+  '/icons/sutek-apple-180-v242.png'
 ];
 
 self.addEventListener('install', event => {
@@ -30,27 +30,33 @@ self.addEventListener('fetch', event => {
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return;
 
-  if (req.mode === 'navigate') {
+  // Manifest must always prefer the network so installed-app icon updates are not stuck.
+  if (url.pathname === '/manifest.webmanifest') {
     event.respondWith(
-      fetch(req).catch(() => caches.match('/offline.html'))
+      fetch(req).catch(() => caches.match(req))
     );
     return;
   }
 
+  if (req.mode === 'navigate') {
+    event.respondWith(fetch(req).catch(() => caches.match('/offline.html')));
+    return;
+  }
+
   const isStatic =
-    url.pathname === '/manifest.webmanifest' ||
     url.pathname.startsWith('/icons/') ||
     url.pathname.endsWith('.css') ||
     url.pathname.endsWith('.js') ||
-    url.pathname.endsWith('.woff2');
+    url.pathname.endsWith('.woff2') ||
+    url.pathname === '/favicon.ico';
 
   if (isStatic) {
     event.respondWith(
-      caches.match(req).then(cached => cached || fetch(req).then(res => {
+      fetch(req).then(res => {
         const copy = res.clone();
         caches.open(CACHE_NAME).then(cache => cache.put(req, copy));
         return res;
-      }))
+      }).catch(() => caches.match(req))
     );
   }
 });
