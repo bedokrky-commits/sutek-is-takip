@@ -793,3 +793,65 @@ button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible,
   .myLiveStatusBar button{width:100%;min-height:34px}
   .liveJobBadge{width:100%}
 }
+
+/* v2.1 — Service time tracking */
+.myLiveStatusBar em{
+  font-style:normal;
+  font-size:10px;
+  font-weight:750;
+  color:#4652d6;
+  background:#f0f2ff;
+  border-radius:999px;
+  padding:4px 7px;
+  white-space:nowrap;
+}
+.serviceAvailabilityList article{
+  grid-template-columns:minmax(0,1fr) auto;
+}
+.serviceTodayTimes{
+  grid-column:1/-1;
+  display:grid;
+  grid-template-columns:repeat(3,1fr);
+  gap:5px;
+  padding-left:15px;
+}
+.serviceTodayTimes span{
+  font-size:8px!important;
+  color:#7a8494!important;
+  background:#f7f8fa;
+  border:1px solid #eceef2;
+  border-radius:6px;
+  padding:4px 5px;
+  text-align:center!important;
+}
+.serviceTodayTimes b{color:#2f3948}
+
+.serviceTimeTable{width:100%;overflow-x:auto}
+.serviceTimeRow{
+  display:grid;
+  grid-template-columns:minmax(170px,1.4fr) .45fr .8fr .8fr .9fr .9fr;
+  align-items:center;
+  min-width:760px;
+  border-bottom:1px solid #edf0f3;
+}
+.serviceTimeRow:last-child{border-bottom:0}
+.serviceTimeRow>*{padding:11px 13px;font-size:11px}
+.serviceTimeHead{
+  background:#f7f8fb;
+  color:#667085;
+  font-weight:700;
+}
+.serviceTimeRow>span:not(:first-child){text-align:center}
+.serviceTimeRow>b{font-size:12px}
+.serviceTimeReportPanel{margin-top:15px}
+
+@media(max-width:560px){
+  .myLiveStatusBar em{
+    width:100%;
+    margin-left:16px;
+  }
+  .serviceTodayTimes{
+    padding-left:0;
+  }
+  .serviceTimeRow{min-width:690px}
+}

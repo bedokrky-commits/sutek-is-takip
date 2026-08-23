@@ -67,6 +67,16 @@ type ServiceLiveStatus = {
   job_id?: string | null
   updated_at: string
 }
+type ServiceTimeLog = {
+  id: string
+  job_id: string
+  user_id: string
+  en_route_at?: string | null
+  on_site_at?: string | null
+  completed_at?: string | null
+  created_at: string
+  updated_at: string
+}
 
 const statusText: Record<Status, string> = {
   pending: 'Bekliyor',
@@ -92,6 +102,8 @@ export default function Home() {
   const [jobHistory, setJobHistory] = useState<JobHistory[]>([])
   const [serviceReports, setServiceReports] = useState<ServiceReport[]>([])
   const [serviceLiveStatuses, setServiceLiveStatuses] = useState<ServiceLiveStatus[]>([])
+  const [serviceTimeLogs, setServiceTimeLogs] = useState<ServiceTimeLog[]>([])
+  const [clockTick, setClockTick] = useState(Date.now())
   const [jobComments, setJobComments] = useState<JobComment[]>([])
   const [attachments, setAttachments] = useState<Attachment[]>([])
   const [filesJob, setFilesJob] = useState<Job | null>(null)
@@ -173,12 +185,13 @@ export default function Home() {
       setRole(profile.role as Role)
     }
 
-    const [{ data: js }, { data: ns }, { data: hs }, { data: sr }, { data: sls }, { data: cm }, { data: at }] = await Promise.all([
+    const [{ data: js }, { data: ns }, { data: hs }, { data: sr }, { data: sls }, { data: stl }, { data: cm }, { data: at }] = await Promise.all([
       supabase.from('jobs').select('*, creator:profiles!jobs_created_by_fkey(full_name), assignee:profiles!jobs_assigned_to_fkey(full_name)').order('scheduled_at', { ascending: true }),
       supabase.from('notifications').select('*').eq('user_id', user.id).order('created_at', { ascending: false }).limit(30),
       supabase.from('job_status_history').select('id,job_id,new_status,created_at,changed_by,changer:profiles!job_status_history_changed_by_fkey(full_name,role)').order('created_at', { ascending: true }),
       supabase.from('service_reports').select('id,job_id,work_performed,parts_used,internal_note,created_by,updated_by,created_at,updated_at').order('updated_at', { ascending: false }),
       supabase.from('service_live_status').select('user_id,status,job_id,updated_at'),
+      supabase.from('service_time_logs').select('id,job_id,user_id,en_route_at,on_site_at,completed_at,created_at,updated_at').order('created_at', { ascending: false }),
       supabase.from('job_comments').select('id,job_id,author_id,message,created_at,author:profiles!job_comments_author_id_fkey(full_name,role)').order('created_at', { ascending: true }),
       supabase.from('job_attachments').select('id,job_id,file_name,storage_path,mime_type,file_size,created_at').order('created_at', { ascending: false })
     ])
@@ -187,6 +200,7 @@ export default function Home() {
     setJobHistory((hs ?? []) as JobHistory[])
     setServiceReports((sr ?? []) as ServiceReport[])
     setServiceLiveStatuses((sls ?? []) as ServiceLiveStatus[])
+    setServiceTimeLogs((stl ?? []) as ServiceTimeLog[])
     setJobComments((cm ?? []) as JobComment[])
     setAttachments((at ?? []) as Attachment[])
 
@@ -206,6 +220,11 @@ export default function Home() {
     }
     setLoading(false)
   }
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setClockTick(Date.now()), 60000)
+    return () => window.clearInterval(timer)
+  }, [])
 
   useEffect(() => {
     load()
@@ -286,6 +305,18 @@ export default function Home() {
       .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'service_live_status' }, payload => {
         const userId = String((payload.old as { user_id?: string })?.user_id || '')
         if (userId) setServiceLiveStatuses(current => current.filter(s => s.user_id !== userId))
+      })
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'service_time_logs' }, payload => {
+        const log = payload.new as ServiceTimeLog
+        setServiceTimeLogs(current => current.some(x => x.id === log.id) ? current.map(x => x.id === log.id ? log : x) : [log, ...current])
+      })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'service_time_logs' }, payload => {
+        const log = payload.new as ServiceTimeLog
+        setServiceTimeLogs(current => current.some(x => x.id === log.id) ? current.map(x => x.id === log.id ? log : x) : [log, ...current])
+      })
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'service_time_logs' }, payload => {
+        const id = String((payload.old as { id?: string })?.id || '')
+        if (id) setServiceTimeLogs(current => current.filter(x => x.id !== id))
       })
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'job_comments' }, payload => {
         const raw = payload.new as JobComment
@@ -1056,11 +1087,34 @@ export default function Home() {
   const myAssignedLate = myAssignedOpen.filter(j => new Date(j.scheduled_at).getTime() < Date.now()).length
   const myAssignedToday = myAssignedOpen.filter(j => new Date(j.scheduled_at).toDateString() === new Date().toDateString()).length
 
+  const durationMs = (start?: string | null, end?: string | null) => {
+    if (!start) return 0
+    const a = new Date(start).getTime()
+    const b = end ? new Date(end).getTime() : clockTick
+    return Math.max(0, b - a)
+  }
+  const formatDuration = (ms: number) => {
+    const totalMinutes = Math.max(0, Math.round(ms / 60000))
+    const hours = Math.floor(totalMinutes / 60)
+    const minutes = totalMinutes % 60
+    if (hours <= 0) return `${minutes} dk`
+    return `${hours} sa ${minutes} dk`
+  }
+  const logTravelMs = (log: ServiceTimeLog) => durationMs(log.en_route_at, log.on_site_at || log.completed_at)
+  const logServiceMs = (log: ServiceTimeLog) => log.on_site_at ? durationMs(log.on_site_at, log.completed_at) : 0
+  const logTotalMs = (log: ServiceTimeLog) => durationMs(log.en_route_at || log.on_site_at, log.completed_at)
+  const todayDateKey = new Date().toDateString()
+  const isTodayLog = (log: ServiceTimeLog) => {
+    const value = log.completed_at || log.on_site_at || log.en_route_at || log.created_at
+    return new Date(value).toDateString() === todayDateKey
+  }
+
   const serviceStatusRows = serviceProfiles.map(person => {
     const assigned = jobs.filter(j => j.assigned_to === person.id)
     const todayKey = new Date().toDateString()
     const live = serviceLiveStatuses.find(s => s.user_id === person.id)
     const liveJob = live?.job_id ? jobs.find(j => j.id === live.job_id) : null
+    const todayLogs = serviceTimeLogs.filter(log => log.user_id === person.id && isTodayLog(log))
     return {
       id: person.id,
       name: person.full_name,
@@ -1072,7 +1126,10 @@ export default function Home() {
       liveStatus: live?.status || 'available' as 'available' | 'en_route' | 'on_site',
       liveJobId: live?.job_id || null,
       liveJobCustomer: liveJob?.customer_name || null,
-      liveUpdatedAt: live?.updated_at || null
+      liveUpdatedAt: live?.updated_at || null,
+      todayTravelMs: todayLogs.reduce((sum, log) => sum + logTravelMs(log), 0),
+      todayServiceMs: todayLogs.reduce((sum, log) => sum + logServiceMs(log), 0),
+      todayTotalMs: todayLogs.reduce((sum, log) => sum + logTotalMs(log), 0)
     }
   })
 
@@ -1123,6 +1180,27 @@ export default function Home() {
     serviceReportMap.set(name, current)
   }
   const servicePerformanceReports = Array.from(serviceReportMap.values()).sort((a,b) => (b.completed + b.postponed) - (a.completed + a.postponed))
+
+  const reportTimeLogs = serviceTimeLogs.filter(log => {
+    const value = log.completed_at || log.on_site_at || log.en_route_at || log.created_at
+    return inReportRange(value)
+  })
+  const serviceTimeReports = serviceProfiles.map(person => {
+    const logs = reportTimeLogs.filter(log => log.user_id === person.id)
+    const completedLogs = logs.filter(log => Boolean(log.completed_at))
+    const travelMs = logs.reduce((sum, log) => sum + logTravelMs(log), 0)
+    const serviceMs = logs.reduce((sum, log) => sum + logServiceMs(log), 0)
+    const totalMs = logs.reduce((sum, log) => sum + logTotalMs(log), 0)
+    return {
+      id: person.id,
+      name: person.full_name,
+      jobs: completedLogs.length,
+      travelMs,
+      serviceMs,
+      totalMs,
+      avgMs: completedLogs.length ? Math.round(totalMs / completedLogs.length) : 0
+    }
+  }).filter(row => row.jobs > 0 || row.totalMs > 0).sort((a,b) => b.totalMs - a.totalMs)
 
   const maintenanceJobs = jobs.filter(j => j.next_maintenance_at).sort((a,b) => +new Date(a.next_maintenance_at!) - +new Date(b.next_maintenance_at!))
   const dueMaintenance = maintenanceJobs.filter(j => new Date(j.next_maintenance_at!).getTime() <= Date.now() + 30 * 86400000)
@@ -1231,7 +1309,7 @@ export default function Home() {
         {role === 'service' && <div className="serviceOpsSummary">
           <div className="serviceOpsTitle"><div><h2>Servis Operasyon</h2><p>Kendinize atanmış işler listede otomatik olarak en üste gelir.</p></div><span>{myAssignedOpen.length} açık görev</span></div>
           <div className={`myLiveStatusBar ${myLiveStatus?.status || 'available'}`}>
-            <div><span className="livePulse"></span><b>{myLiveLabel}</b><small>{myLiveJob ? `${myLiveJob.service_no || ''} · ${myLiveJob.customer_name}` : 'Aktif servis işi yok'}</small></div>
+            <div><span className="livePulse"></span><b>{myLiveLabel}</b><small>{myLiveJob ? `${myLiveJob.service_no || ''} · ${myLiveJob.customer_name}` : 'Aktif servis işi yok'}</small>{myLiveJob && (() => { const log = serviceTimeLogs.find(x => x.job_id === myLiveJob.id && x.user_id === currentUserId); return log ? <em>{myLiveStatus?.status === 'en_route' ? `Yolda: ${formatDuration(logTravelMs(log))}` : myLiveStatus?.status === 'on_site' ? `Serviste: ${formatDuration(logServiceMs(log))}` : ''}</em> : null })()}</div>
             {myLiveStatus?.status && myLiveStatus.status !== 'available' && <button onClick={() => setMyServiceLiveStatus('available')}>Müsaitim</button>}
           </div>
           <div className="serviceOpsCards">
@@ -1371,6 +1449,7 @@ export default function Home() {
                         <div className="serviceAvailabilityName"><span className={`availabilityDot ${stateClass}`}></span><b>{row.name}</b></div>
                         <span className={`availabilityState ${stateClass}`}>{stateText}</span>
                         <small>{row.liveJobCustomer ? `Aktif: ${row.liveJobCustomer} · ` : ''}{row.pending} bekleyen · {row.inProgress} işlemde</small>
+                        <div className="serviceTodayTimes"><span>Yol <b>{formatDuration(row.todayTravelMs)}</b></span><span>Servis <b>{formatDuration(row.todayServiceMs)}</b></span><span>Toplam <b>{formatDuration(row.todayTotalMs)}</b></span></div>
                       </article>
                     })}
                 </div>
@@ -1455,6 +1534,14 @@ export default function Home() {
               <div className="reportTable">
                 <div className="serviceReportRow reportHead"><span>Servis Personeli</span><span>Tamamladı</span><span>Erteledi</span><span>Toplam İşlem</span></div>
                 {servicePerformanceReports.map(r => <div className="serviceReportRow" key={r.name}><b>{r.name}</b><span>{r.completed}</span><span>{r.postponed}</span><span>{r.completed + r.postponed}</span></div>)}
+              </div>}
+          </div>
+          <div className="panel serviceTimeReportPanel">
+            <div className="panelHead"><div><h2>Servis Süreleri</h2><p className="muted reportIntro">Yola çıkış, müşteriye varış ve tamamlanma kayıtlarından hesaplanır.</p></div><span>{serviceTimeReports.length} servis</span></div>
+            {serviceTimeReports.length === 0 ? <div className="empty">Bu tarih aralığında süre kaydı bulunmuyor.</div> :
+              <div className="serviceTimeTable">
+                <div className="serviceTimeRow serviceTimeHead"><span>Servis Personeli</span><span>İş</span><span>Yolda</span><span>Serviste</span><span>Toplam</span><span>Ort. / İş</span></div>
+                {serviceTimeReports.map(r => <div className="serviceTimeRow" key={r.id}><b>{r.name}</b><span>{r.jobs}</span><span>{formatDuration(r.travelMs)}</span><span>{formatDuration(r.serviceMs)}</span><span><b>{formatDuration(r.totalMs)}</b></span><span>{formatDuration(r.avgMs)}</span></div>)}
               </div>}
           </div>
         </>
