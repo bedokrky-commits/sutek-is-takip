@@ -1262,10 +1262,6 @@ export default function Home() {
   const dailyTravelTotalMs = dailyPersonnelPerformance.reduce((sum, row) => sum + row.travelMs, 0)
   const dailyServiceTotalMs = dailyPersonnelPerformance.reduce((sum, row) => sum + row.serviceMs, 0)
 
-  const todayOpenJobs = dashboardTodayJobs.filter(j => j.status !== 'completed')
-  const todayUnassignedJobs = dashboardTodayJobs.filter(j => j.status !== 'completed' && !j.assigned_to)
-  const todayUrgentJobs = dashboardTodayJobs.filter(j => j.status !== 'completed' && j.priority === 'urgent')
-
   const maintenanceJobs = jobs.filter(j => j.next_maintenance_at).sort((a,b) => +new Date(a.next_maintenance_at!) - +new Date(b.next_maintenance_at!))
   const dueMaintenance = maintenanceJobs.filter(j => new Date(j.next_maintenance_at!).getTime() <= Date.now() + 30 * 86400000)
 
@@ -1292,6 +1288,9 @@ export default function Home() {
   }
 
   const dashboardTodayJobs = jobs.filter(j => new Date(j.scheduled_at).toDateString() === new Date().toDateString())
+  const todayOpenJobs = dashboardTodayJobs.filter(j => j.status !== 'completed')
+  const todayUnassignedJobs = dashboardTodayJobs.filter(j => j.status !== 'completed' && !j.assigned_to)
+  const todayUrgentJobs = dashboardTodayJobs.filter(j => j.status !== 'completed' && j.priority === 'urgent')
   const dashboardOpen = jobs.filter(j => j.status !== 'completed')
   const dashboardLate = dashboardOpen.filter(j => new Date(j.scheduled_at).getTime() < Date.now())
   const dashboardThisMonth = jobs.filter(j => { const d=new Date(j.scheduled_at), n=new Date(); return d.getMonth()===n.getMonth() && d.getFullYear()===n.getFullYear() })
