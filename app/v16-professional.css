@@ -633,3 +633,126 @@ button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible,
     grid-template-columns:repeat(3,minmax(0,1fr));
   }
 }
+
+
+/* v1.9 — Manager Operations Center */
+.operationSummaryCards .attentionCard{border-color:#f1c8c5;background:#fff9f8}
+.operationSummaryCards .attentionCard strong{color:#b42318}
+.operationSummaryCards .urgentCard{border-color:#f2d1d1;background:#fffafa}
+.operationSummaryCards .urgentCard strong{color:#c52828}
+.operationSummaryCards .unassignedCard{border-color:#eeddb9;background:#fffdf7}
+.operationSummaryCards .unassignedCard strong{color:#8a5a00}
+
+.operationGrid{
+  display:grid;
+  grid-template-columns:minmax(0,1.45fr) minmax(330px,.75fr);
+  gap:15px;
+  margin-bottom:15px;
+}
+.operationSideStack{display:grid;gap:15px;align-content:start}
+
+.operationAttentionPanel .panelHead{border-bottom:1px solid #eceff3}
+.operationJobList{display:grid}
+.operationJobRow{
+  display:grid;
+  grid-template-columns:78px minmax(0,1fr) auto;
+  align-items:center;
+  gap:12px;
+  padding:11px 15px;
+  border-bottom:1px solid #edf0f3;
+  background:#fff;
+}
+.operationJobRow:last-child{border-bottom:0}
+.operationJobRow.urgent{box-shadow:inset 4px 0 0 #e5484d}
+.operationJobRow.late{background:#fffafa}
+.operationJobTime{display:flex;flex-direction:column;border-right:1px solid #e8ebef}
+.operationJobTime strong{font-size:17px}
+.operationJobTime small{font-size:9px;color:#7a8494;margin-top:2px}
+.operationJobMain{min-width:0;display:flex;flex-direction:column;gap:4px}
+.operationJobMain>div{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.operationJobMain b{font-size:13px}
+.operationJobMain>span{font-size:10px;color:#667085}
+.opUrgentBadge,.opLateBadge{font-size:8px;font-weight:800;padding:3px 5px;border-radius:999px}
+.opUrgentBadge{background:#fee2e2;color:#991b1b}
+.opLateBadge{background:#7f1d1d;color:#fff}
+.operationJobActions{display:flex;gap:5px}
+.operationJobActions button{border:1px solid #dfe3e9;background:#fff;border-radius:8px;padding:7px 8px;font-size:9px}
+.operationGoodState{padding:28px 18px;text-align:center;color:#27704a;background:#f7fcf9;font-size:12px}
+.operationGoodState.compact{padding:18px}
+
+.serviceAvailabilityList{display:grid;padding:7px 10px 11px;gap:6px}
+.serviceAvailabilityList article{
+  display:grid;
+  grid-template-columns:minmax(0,1fr) auto;
+  align-items:center;
+  gap:5px 10px;
+  padding:9px 10px;
+  border:1px solid #e8ebf0;
+  border-radius:9px;
+  background:#fff;
+}
+.serviceAvailabilityName{display:flex;align-items:center;gap:7px}
+.serviceAvailabilityName b{font-size:12px}
+.availabilityDot{width:8px;height:8px;border-radius:50%;display:inline-block}
+.availabilityDot.available{background:#22a06b;box-shadow:0 0 0 3px #e4f5ec}
+.availabilityDot.working{background:#3478c8;box-shadow:0 0 0 3px #e6f0fb}
+.availabilityDot.busy{background:#d99a24;box-shadow:0 0 0 3px #fff3d8}
+.availabilityState{font-size:9px;font-weight:750;border-radius:999px;padding:4px 7px}
+.availabilityState.available{background:#e8f8ef;color:#177047}
+.availabilityState.working{background:#e8f1fb;color:#1a5d9d}
+.availabilityState.busy{background:#fff3d8;color:#845800}
+.serviceAvailabilityList small{grid-column:1/-1;font-size:9px;color:#7a8494;padding-left:15px}
+
+.unassignedList{display:grid;padding:7px 10px 11px;gap:5px}
+.unassignedList button{
+  width:100%;
+  display:flex;
+  justify-content:space-between;
+  gap:10px;
+  align-items:center;
+  border:1px solid #e7eaf0;
+  border-radius:9px;
+  background:#fff;
+  padding:9px 10px;
+  text-align:left;
+}
+.unassignedList button:hover{background:#fafbff;border-color:#cfd5e7}
+.unassignedList span{display:flex;flex-direction:column;gap:2px}
+.unassignedList b{font-size:11px}
+.unassignedList small{font-size:9px;color:#7a8494}
+.unassignedList strong{font-size:9px;color:#4652d6;white-space:nowrap}
+
+.operationLowerGrid{margin-top:0}
+.monthlyOperationSummary{
+  display:grid;
+  grid-template-columns:repeat(2,1fr);
+  gap:8px;
+  padding:14px;
+}
+.monthlyOperationSummary div{
+  background:#f7f8fa;
+  border:1px solid #eceef2;
+  border-radius:10px;
+  padding:11px;
+}
+.monthlyOperationSummary span{display:block;font-size:9px;color:#667085}
+.monthlyOperationSummary strong{display:block;font-size:21px;margin-top:4px;color:#172033}
+
+@media(max-width:1100px){
+  .operationGrid{grid-template-columns:1fr}
+  .operationSideStack{grid-template-columns:1fr 1fr}
+}
+@media(max-width:700px){
+  .operationSideStack{grid-template-columns:1fr}
+  .operationJobRow{grid-template-columns:60px minmax(0,1fr)}
+  .operationJobActions{grid-column:1/-1;padding-left:72px}
+  .monthlyOperationSummary{grid-template-columns:repeat(2,1fr)}
+}
+@media(max-width:480px){
+  .operationSummaryCards{grid-template-columns:repeat(2,1fr)}
+  .operationJobRow{grid-template-columns:1fr}
+  .operationJobTime{border-right:0;border-bottom:1px solid #edf0f3;padding-bottom:5px;flex-direction:row;gap:7px;align-items:center}
+  .operationJobActions{padding-left:0}
+  .operationJobActions button{flex:1}
+  .monthlyOperationSummary{grid-template-columns:1fr 1fr}
+}

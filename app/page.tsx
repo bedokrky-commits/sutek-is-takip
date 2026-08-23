@@ -1105,6 +1105,25 @@ export default function Home() {
   const dashboardCompletionRate = dashboardThisMonth.length ? Math.round(dashboardCompletedMonth / dashboardThisMonth.length * 100) : 0
   const dashboardLast7 = Array.from({length:7},(_,i)=>{ const d=new Date(); d.setHours(0,0,0,0); d.setDate(d.getDate()-(6-i)); return { d, count: jobs.filter(j=>new Date(j.scheduled_at).toDateString()===d.toDateString()).length, completed: jobs.filter(j=>new Date(j.scheduled_at).toDateString()===d.toDateString()&&j.status==='completed').length } })
 
+  const dashboardUrgent = jobs
+    .filter(j => j.status !== 'completed' && j.priority === 'urgent')
+    .sort((a,b) => +new Date(a.scheduled_at) - +new Date(b.scheduled_at))
+  const dashboardUnassigned = jobs
+    .filter(j => j.status !== 'completed' && !j.assigned_to)
+    .sort((a,b) => +new Date(a.scheduled_at) - +new Date(b.scheduled_at))
+  const dashboardAvailableServices = serviceStatusRows.filter(r => r.pending + r.inProgress === 0)
+  const dashboardWorkingServices = serviceStatusRows.filter(r => r.inProgress > 0)
+  const dashboardAttentionMap = new Map<string, Job>()
+  ;[...dashboardUrgent, ...dashboardLate].forEach(j => dashboardAttentionMap.set(j.id, j))
+  const dashboardAttention = Array.from(dashboardAttentionMap.values())
+    .sort((a,b) => {
+      const au = a.priority === 'urgent' ? 0 : 1
+      const bu = b.priority === 'urgent' ? 0 : 1
+      if (au !== bu) return au - bu
+      return +new Date(a.scheduled_at) - +new Date(b.scheduled_at)
+    })
+    .slice(0, 8)
+
   const viewTitle =
     view === 'calendar' ? 'Takvim & Planlama' :
     view === 'maintenance' ? 'Periyodik Bakımlar' :
@@ -1181,7 +1200,7 @@ export default function Home() {
           <article><span>Ertelenen</span><strong>{jobs.filter(j => j.status === 'postponed').length}</strong></article>
         </div>
 
-        <div className="panel jobsPanel">
+        <div className="panel">
           <div className="panelHead jobPanelHead">
             <div><h2>{filter === 'bugun' ? 'Bugünün İşleri' : filter === 'bekleyen' ? 'Bekleyen İşler' : 'Tamamlanan İşler'}</h2><input className="searchInput" value={search} onChange={e=>setSearch(e.target.value)} placeholder="Müşteri, telefon, servis veya iş ara…" /></div>
             <div className="quickFilters"><button className={jobQuickFilter==='all'?'selected':''} onClick={()=>setJobQuickFilter('all')}>Tümü</button><button className={jobQuickFilter==='urgent'?'selected':''} onClick={()=>setJobQuickFilter('urgent')}>Acil</button><button className={jobQuickFilter==='late'?'selected':''} onClick={()=>setJobQuickFilter('late')}>Geciken</button><button className={jobQuickFilter==='upcoming'?'selected':''} onClick={()=>setJobQuickFilter('upcoming')}>Yaklaşan</button><span>{displayJobs.length} kayıt</span></div>
@@ -1248,15 +1267,72 @@ export default function Home() {
         </div>
       : view === 'dashboard' && canSeeReports ?
         <>
-          <div className="dashboardCards">
+          <div className="dashboardCards operationSummaryCards">
             <article><span>Bugünkü İş</span><strong>{dashboardTodayJobs.length}</strong><small>{dashboardTodayJobs.filter(j=>j.status==='completed').length} tamamlandı</small></article>
-            <article><span>Açık İş</span><strong>{dashboardOpen.length}</strong><small>{dashboardLate.length} geciken</small></article>
-            <article><span>Bu Ay Tamamlanan</span><strong>{dashboardCompletedMonth}</strong><small>%{dashboardCompletionRate} tamamlama</small></article>
-            <article><span>Bakım Bekleyen</span><strong>{dueMaintenance.length}</strong><small>30 gün içinde / geçmiş</small></article>
+            <article className={dashboardLate.length ? 'attentionCard' : ''}><span>Geciken</span><strong>{dashboardLate.length}</strong><small>{dashboardLate.length ? 'Müdahale gerekiyor' : 'Geciken iş yok'}</small></article>
+            <article className={dashboardUrgent.length ? 'urgentCard' : ''}><span>Acil İş</span><strong>{dashboardUrgent.length}</strong><small>{dashboardUrgent.length ? 'Öncelikli takip' : 'Acil iş yok'}</small></article>
+            <article className={dashboardUnassigned.length ? 'unassignedCard' : ''}><span>Atanmamış</span><strong>{dashboardUnassigned.length}</strong><small>{dashboardUnassigned.length ? 'Servis bekliyor' : 'Tüm işler atanmış'}</small></article>
           </div>
-          <div className="dashboardGrid">
+
+          <div className="operationGrid">
+            <div className="panel operationAttentionPanel">
+              <div className="panelHead">
+                <div><h2>Müdahale Gerekenler</h2><p className="muted">Acil veya geciken açık işler</p></div>
+                <span>{dashboardAttention.length} iş</span>
+              </div>
+              {dashboardAttention.length === 0 ? <div className="operationGoodState">✓ Şu anda acil müdahale gerektiren iş yok.</div> :
+                <div className="operationJobList">{dashboardAttention.map(job => {
+                  const isLate = new Date(job.scheduled_at).getTime() < Date.now()
+                  return <article key={job.id} className={`operationJobRow ${job.priority === 'urgent' ? 'urgent' : ''} ${isLate ? 'late' : ''}`}>
+                    <div className="operationJobTime"><strong>{new Date(job.scheduled_at).toLocaleTimeString('tr-TR',{hour:'2-digit',minute:'2-digit'})}</strong><small>{new Date(job.scheduled_at).toLocaleDateString('tr-TR')}</small></div>
+                    <div className="operationJobMain">
+                      <div><b>{job.customer_name}</b>{job.priority === 'urgent' && <span className="opUrgentBadge">ACİL</span>}{isLate && <span className="opLateBadge">GECİKTİ</span>}</div>
+                      <span>{job.service_no || '-'} · {job.assignee?.full_name || 'Servis atanmamış'}</span>
+                    </div>
+                    <div className="operationJobActions">
+                      <button onClick={() => setHistoryPhone(job.customer_phone)}>Müşteri</button>
+                      {canSchedule && <button className="primary" onClick={() => setEditJob(job)}>Düzenle</button>}
+                    </div>
+                  </article>
+                })}</div>}
+            </div>
+
+            <div className="operationSideStack">
+              <div className="panel serviceAvailabilityPanel">
+                <div className="panelHead"><div><h2>Servis Durumu</h2><p className="muted">Anlık iş yükü ve müsaitlik</p></div><span>{serviceStatusRows.length} personel</span></div>
+                <div className="serviceAvailabilityList">
+                  {serviceStatusRows.length === 0 ? <div className="empty compactEmpty">Aktif servis personeli yok.</div> :
+                    serviceStatusRows.map(row => {
+                      const available = row.pending + row.inProgress === 0
+                      return <article key={row.id}>
+                        <div className="serviceAvailabilityName"><span className={`availabilityDot ${available ? 'available' : row.inProgress > 0 ? 'working' : 'busy'}`}></span><b>{row.name}</b></div>
+                        <span className={`availabilityState ${available ? 'available' : row.inProgress > 0 ? 'working' : 'busy'}`}>{available ? 'Müsait' : row.inProgress > 0 ? 'İşlemde' : 'Görevli'}</span>
+                        <small>{row.pending} bekleyen · {row.inProgress} işlemde</small>
+                      </article>
+                    })}
+                </div>
+              </div>
+
+              <div className="panel unassignedPanel">
+                <div className="panelHead"><div><h2>Atama Bekleyen</h2><p className="muted">Henüz servis personeli seçilmemiş işler</p></div><span>{dashboardUnassigned.length}</span></div>
+                {dashboardUnassigned.length === 0 ? <div className="operationGoodState compact">✓ Atanmamış iş yok.</div> :
+                  <div className="unassignedList">{dashboardUnassigned.slice(0,5).map(job =>
+                    <button key={job.id} onClick={() => canSchedule ? setEditJob(job) : setHistoryPhone(job.customer_phone)}>
+                      <span><b>{job.customer_name}</b><small>{new Date(job.scheduled_at).toLocaleString('tr-TR')}</small></span><strong>Atama Yap →</strong>
+                    </button>
+                  )}</div>}
+              </div>
+            </div>
+          </div>
+
+          <div className="dashboardGrid operationLowerGrid">
             <div className="panel"><div className="panelHead"><div><h2>Son 7 Gün</h2><p className="muted">Günlük iş ve tamamlanma özeti</p></div></div><div className="weekSummary">{dashboardLast7.map(x=><article key={x.d.toISOString()}><span>{x.d.toLocaleDateString('tr-TR',{weekday:'short'})}</span><strong>{x.count}</strong><small>{x.completed} tamamlandı</small></article>)}</div></div>
-            <div className="panel"><div className="panelHead"><div><h2>Servis Yükü</h2><p className="muted">Personel bazında güncel görev durumu</p></div></div><div className="dashboardServiceList smartServiceLoad">{serviceStatusRows.map(row=><div key={row.id} className="serviceLoadRow"><b>{row.name}</b><div className="serviceLoadMetrics"><span><strong>{row.pending}</strong> Bekleyen</span><span><strong>{row.inProgress}</strong> İşlemde</span><span><strong>{row.todayCompleted}</strong> Bugün Tamamlanan</span><span><strong>{row.postponed}</strong> Ertelenen</span></div></div>)}</div></div>
+            <div className="panel"><div className="panelHead"><div><h2>Aylık Özet</h2><p className="muted">Bu ayın operasyon performansı</p></div></div><div className="monthlyOperationSummary">
+              <div><span>Bu Ay Tamamlanan</span><strong>{dashboardCompletedMonth}</strong></div>
+              <div><span>Tamamlama Oranı</span><strong>%{dashboardCompletionRate}</strong></div>
+              <div><span>Bakım Bekleyen</span><strong>{dueMaintenance.length}</strong></div>
+              <div><span>Müsait Servis</span><strong>{dashboardAvailableServices.length}</strong></div>
+            </div></div>
           </div>
         </>
       : view === 'maintenance' && canSeeReports ?
