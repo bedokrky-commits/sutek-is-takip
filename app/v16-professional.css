@@ -574,3 +574,62 @@ button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible,
     overflow:visible!important;
   }
 }
+
+
+/* v1.7.3 — Desktop Other Actions inline expansion */
+@media(min-width:561px){
+  .smartActions{
+    overflow:visible;
+  }
+
+  .moreActions{
+    position:static;
+    width:100%;
+    z-index:auto;
+  }
+
+  .moreActions[open]{
+    z-index:auto;
+  }
+
+  .moreActions summary{
+    margin-left:auto;
+    width:max-content;
+    min-width:118px;
+  }
+
+  .moreActionsMenu{
+    position:static!important;
+    width:100%;
+    max-height:none!important;
+    overflow:visible!important;
+    margin-top:7px;
+    padding:7px;
+    display:grid;
+    grid-template-columns:repeat(2,minmax(0,1fr));
+    gap:5px;
+    box-shadow:none;
+    border:1px solid #dfe3e9;
+    border-radius:10px;
+    background:#f8f9fb;
+  }
+
+  .moreActionsMenu button{
+    width:100%;
+    min-height:33px;
+    text-align:center;
+    justify-content:center;
+    white-space:normal;
+  }
+
+  .jobsPanel .job{
+    align-items:start;
+  }
+}
+
+/* Wide desktop gets 3 columns in the expanded menu */
+@media(min-width:1350px){
+  .moreActionsMenu{
+    grid-template-columns:repeat(3,minmax(0,1fr));
+  }
+}
