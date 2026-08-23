@@ -934,3 +934,103 @@ button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible,
   .dailyPerformanceSummary{grid-template-columns:1fr 1fr;padding:9px}
   .dailyPerformanceSummary strong{font-size:15px}
 }
+
+/* v2.3 — Daily usability improvements */
+.managerQuickActions{
+  display:grid;
+  grid-template-columns:repeat(5,1fr);
+  gap:8px;
+  margin-bottom:15px;
+}
+.managerQuickActions button{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:8px;
+  border:1px solid #e3e7ed;
+  background:#fff;
+  border-radius:11px;
+  min-height:52px;
+  padding:8px 10px;
+  box-shadow:0 4px 12px rgba(16,24,40,.035);
+}
+.managerQuickActions button:hover{background:#f8f9fc;border-color:#cfd5df}
+.managerQuickActions b{font-size:18px;color:#172033}
+.managerQuickActions span{font-size:10px;color:#667085;font-weight:650}
+.managerQuickActions .dangerQuick{background:#fff7f7;border-color:#f2cdcd}
+.managerQuickActions .dangerQuick b{color:#b42318}
+.managerQuickActions .warningQuick{background:#fffaf0;border-color:#f0dfb9}
+.managerQuickActions .warningQuick b{color:#8a5a00}
+
+.calendarToolbarRight{
+  display:flex;
+  align-items:center;
+  gap:8px;
+}
+.calendarToolbarRight select{
+  border:1px solid #dfe3e9;
+  background:#fff;
+  border-radius:8px;
+  padding:7px 9px;
+  font-size:10px;
+  color:#46505f;
+}
+
+.serviceFormJobSummary{
+  display:grid;
+  grid-template-columns:repeat(4,1fr);
+  gap:8px;
+  margin-bottom:13px;
+}
+.serviceFormJobSummary div{
+  background:#f7f8fa;
+  border:1px solid #e9ecf1;
+  border-radius:9px;
+  padding:9px 10px;
+}
+.serviceFormJobSummary span{
+  display:block;
+  font-size:8px;
+  text-transform:uppercase;
+  letter-spacing:.03em;
+  color:#7a8494;
+  margin-bottom:3px;
+}
+.serviceFormJobSummary b{
+  font-size:10px;
+  color:#273142;
+}
+
+.historyToolbar{
+  display:grid;
+  grid-template-columns:minmax(0,1fr) 180px;
+  gap:8px;
+  margin-bottom:12px;
+}
+.historyToolbar input,
+.historyToolbar select{
+  border:1px solid #dfe3e9;
+  border-radius:9px;
+  padding:9px 10px;
+  font-size:11px;
+  background:#fff;
+}
+.historyToolbar input:focus,
+.historyToolbar select:focus{
+  border-color:#929bf0;
+  outline:3px solid rgba(70,82,214,.09);
+}
+
+@media(max-width:900px){
+  .managerQuickActions{grid-template-columns:repeat(3,1fr)}
+  .calendarToolbar{gap:10px;flex-wrap:wrap}
+  .calendarToolbarRight{width:100%;justify-content:space-between}
+}
+@media(max-width:560px){
+  .managerQuickActions{grid-template-columns:repeat(2,1fr)}
+  .managerQuickActions button{min-height:48px}
+  .serviceFormJobSummary{grid-template-columns:repeat(2,1fr)}
+  .historyToolbar{grid-template-columns:1fr}
+  .calendarToolbarRight{align-items:stretch;flex-direction:column}
+  .calendarToolbarRight select{width:100%}
+}

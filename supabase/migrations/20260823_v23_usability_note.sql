@@ -1,0 +1,2 @@
+-- v2.3 daily usability improvements
+-- No schema change required.

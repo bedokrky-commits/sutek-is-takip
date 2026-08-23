@@ -146,6 +146,9 @@ export default function Home() {
   const [reportStart, setReportStart] = useState('')
   const [reportEnd, setReportEnd] = useState('')
   const [historyPage, setHistoryPage] = useState(1)
+  const [historyStatusFilter, setHistoryStatusFilter] = useState<'all' | Status>('all')
+  const [historySearch, setHistorySearch] = useState('')
+  const [calendarServiceFilter, setCalendarServiceFilter] = useState('all')
   const [jobCreateBusy, setJobCreateBusy] = useState(false)
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null)
   const [isOnline, setIsOnline] = useState(true)
@@ -1137,10 +1140,16 @@ export default function Home() {
   })
 
   const historyJobs = historyPhone ? jobs.filter(j => j.customer_phone === historyPhone).sort((a,b) => +new Date(b.scheduled_at) - +new Date(a.scheduled_at)) : []
+  const filteredHistoryJobs = historyJobs.filter(j => {
+    const statusOk = historyStatusFilter === 'all' || j.status === historyStatusFilter
+    const q = historySearch.trim().toLocaleLowerCase('tr-TR')
+    const searchOk = !q || `${j.service_no || ''} ${j.description} ${j.customer_address || ''} ${j.assignee?.full_name || ''}`.toLocaleLowerCase('tr-TR').includes(q)
+    return statusOk && searchOk
+  })
   const historyPageSize = 5
-  const historyTotalPages = Math.max(1, Math.ceil(historyJobs.length / historyPageSize))
+  const historyTotalPages = Math.max(1, Math.ceil(filteredHistoryJobs.length / historyPageSize))
   const safeHistoryPage = Math.min(historyPage, historyTotalPages)
-  const pagedHistoryJobs = historyJobs.slice((safeHistoryPage - 1) * historyPageSize, safeHistoryPage * historyPageSize)
+  const pagedHistoryJobs = filteredHistoryJobs.slice((safeHistoryPage - 1) * historyPageSize, safeHistoryPage * historyPageSize)
   const canCreate = role === 'office' || role === 'admin'
   const canOperate = role === 'service' || role === 'admin'
   const canSchedule = role === 'office' || role === 'admin'
@@ -1253,6 +1262,10 @@ export default function Home() {
   const dailyTravelTotalMs = dailyPersonnelPerformance.reduce((sum, row) => sum + row.travelMs, 0)
   const dailyServiceTotalMs = dailyPersonnelPerformance.reduce((sum, row) => sum + row.serviceMs, 0)
 
+  const todayOpenJobs = dashboardTodayJobs.filter(j => j.status !== 'completed')
+  const todayUnassignedJobs = dashboardTodayJobs.filter(j => j.status !== 'completed' && !j.assigned_to)
+  const todayUrgentJobs = dashboardTodayJobs.filter(j => j.status !== 'completed' && j.priority === 'urgent')
+
   const maintenanceJobs = jobs.filter(j => j.next_maintenance_at).sort((a,b) => +new Date(a.next_maintenance_at!) - +new Date(b.next_maintenance_at!))
   const dueMaintenance = maintenanceJobs.filter(j => new Date(j.next_maintenance_at!).getTime() <= Date.now() + 30 * 86400000)
 
@@ -1266,7 +1279,10 @@ export default function Home() {
   const weekStart = new Date(calendarAnchorDate); weekStart.setDate(weekStart.getDate() - ((weekStart.getDay() + 6) % 7))
   const calendarWeekDays = Array.from({ length: 7 }, (_, i) => { const d = new Date(weekStart); d.setDate(d.getDate() + i); return d })
   const calendarDays = calendarMode === 'month' ? calendarMonthDays : calendarWeekDays
-  const jobsForDay = (d: Date) => jobs.filter(j => new Date(j.scheduled_at).toDateString() === d.toDateString()).sort((a,b)=>+new Date(a.scheduled_at)-+new Date(b.scheduled_at))
+  const jobsForDay = (d: Date) => jobs
+    .filter(j => new Date(j.scheduled_at).toDateString() === d.toDateString())
+    .filter(j => calendarServiceFilter === 'all' || j.assigned_to === calendarServiceFilter)
+    .sort((a,b)=>+new Date(a.scheduled_at)-+new Date(b.scheduled_at))
   const shiftCalendar = (amount: number) => {
     const d = new Date(`${calendarAnchor}T12:00:00`)
     if (calendarMode === 'month') d.setMonth(d.getMonth() + amount)
@@ -1446,7 +1462,13 @@ export default function Home() {
           <div className="calendarToolbar">
             <div className="calendarNav"><button onClick={() => shiftCalendar(-1)}>‹</button><button onClick={() => setCalendarAnchor(localDateInputValue())}>Bugün</button><button onClick={() => shiftCalendar(1)}>›</button></div>
             <h2>{calendarMode === 'month' ? new Intl.DateTimeFormat('tr-TR',{month:'long',year:'numeric'}).format(calendarAnchorDate) : `${calendarWeekDays[0].toLocaleDateString('tr-TR')} - ${calendarWeekDays[6].toLocaleDateString('tr-TR')}`}</h2>
-            <div className="calendarModes"><button className={calendarMode==='week'?'selected':''} onClick={()=>setCalendarMode('week')}>Hafta</button><button className={calendarMode==='month'?'selected':''} onClick={()=>setCalendarMode('month')}>Ay</button></div>
+            <div className="calendarToolbarRight">
+              <select value={calendarServiceFilter} onChange={e => setCalendarServiceFilter(e.target.value)}>
+                <option value="all">Tüm Servisler</option>
+                {serviceProfiles.map(p => <option value={p.id} key={p.id}>{p.full_name}</option>)}
+              </select>
+              <div className="calendarModes"><button className={calendarMode==='week'?'selected':''} onClick={()=>setCalendarMode('week')}>Hafta</button><button className={calendarMode==='month'?'selected':''} onClick={()=>setCalendarMode('month')}>Ay</button></div>
+            </div>
           </div>
           <div className={`calendarGrid ${calendarMode}`}>
             {calendarMode === 'month' && ['Pzt','Sal','Çar','Per','Cum','Cmt','Paz'].map(d => <div className="calendarWeekday" key={d}>{d}</div>)}
@@ -1463,6 +1485,14 @@ export default function Home() {
             <article className={dashboardLate.length ? 'attentionCard' : ''}><span>Geciken</span><strong>{dashboardLate.length}</strong><small>{dashboardLate.length ? 'Müdahale gerekiyor' : 'Geciken iş yok'}</small></article>
             <article className={dashboardUrgent.length ? 'urgentCard' : ''}><span>Acil İş</span><strong>{dashboardUrgent.length}</strong><small>{dashboardUrgent.length ? 'Öncelikli takip' : 'Acil iş yok'}</small></article>
             <article className={dashboardUnassigned.length ? 'unassignedCard' : ''}><span>Atanmamış</span><strong>{dashboardUnassigned.length}</strong><small>{dashboardUnassigned.length ? 'Servis bekliyor' : 'Tüm işler atanmış'}</small></article>
+          </div>
+
+          <div className="managerQuickActions">
+            <button onClick={() => { setView('jobs'); setFilter('bugun'); setJobQuickFilter('all') }}><b>{todayOpenJobs.length}</b><span>Bugün Açık</span></button>
+            <button onClick={() => { setView('jobs'); setFilter('bugun'); setJobQuickFilter('urgent') }} className={todayUrgentJobs.length ? 'dangerQuick' : ''}><b>{todayUrgentJobs.length}</b><span>Bugün Acil</span></button>
+            <button onClick={() => { setView('jobs'); setFilter('bekleyen'); setJobQuickFilter('late') }} className={dashboardLate.length ? 'warningQuick' : ''}><b>{dashboardLate.length}</b><span>Geciken</span></button>
+            <button onClick={() => setView('calendar')}><b>{todayUnassignedJobs.length}</b><span>Bugün Atanmamış</span></button>
+            <button onClick={() => setView('maintenance')}><b>{dueMaintenance.length}</b><span>Bakım Bekleyen</span></button>
           </div>
 
           <div className="operationGrid">
@@ -1712,6 +1742,12 @@ export default function Home() {
     {reportJob && <div className="modalBackdrop" onMouseDown={() => { setReportJob(null); setCompleteAfterReport(false) }}>
       <div className="modal serviceFormModal" onMouseDown={e => e.stopPropagation()}>
         <div className="modalHead"><div><h2>Dijital Servis Formu</h2><p>{reportJob.customer_name} · {reportJob.customer_phone}</p></div><button onClick={() => { setReportJob(null); setCompleteAfterReport(false) }}>×</button></div>
+        <div className="serviceFormJobSummary">
+          <div><span>Servis No</span><b>{reportJob.service_no || '-'}</b></div>
+          <div><span>Planlanan</span><b>{new Date(reportJob.scheduled_at).toLocaleString('tr-TR')}</b></div>
+          <div><span>Servis</span><b>{reportJob.assignee?.full_name || 'Atanmadı'}</b></div>
+          <div><span>Durum</span><b>{statusText[reportJob.status]}</b></div>
+        </div>
         <div className="serviceFormGrid">
           <label>Yapılan İşlem
             <textarea rows={5} value={workPerformedDraft} onChange={e => setWorkPerformedDraft(e.target.value)} readOnly={!['service','admin'].includes(role)} placeholder="Serviste yapılan işlemleri yazın…" />
@@ -1744,7 +1780,18 @@ export default function Home() {
       </div>
     </div>}
 
-    {historyPhone && <div className="modalBackdrop" onMouseDown={() => setHistoryPhone(null)}><div className="modal historyModal serviceHistoryModal" onMouseDown={e => e.stopPropagation()}><div className="modalHead"><div><h2>Müşteri Kartı</h2><p>{historyPhone} · {historyJobs.length} servis kaydı</p></div><button onClick={() => setHistoryPhone(null)}>×</button></div>{historyJobs.length>0 && <div className="customerCardSummary"><div><span>Müşteri</span><b>{historyJobs[0].customer_name}</b></div><div><span>Telefon</span><b>{historyPhone}</b></div><div><span>Adresler</span><b>{Array.from(new Set(historyJobs.map(j=>j.customer_address).filter(Boolean))).length}</b></div><div><span>Toplam Servis</span><b>{historyJobs.length}</b></div><div><span>Son Servis</span><b>{new Date(historyJobs[0].scheduled_at).toLocaleDateString('tr-TR')}</b></div><div><span>Sonraki Bakım</span><b>{historyJobs.find(j=>j.next_maintenance_at)?.next_maintenance_at ? new Date(historyJobs.find(j=>j.next_maintenance_at)!.next_maintenance_at!).toLocaleDateString('tr-TR') : '-'}</b></div></div>}<div className="historyList">{pagedHistoryJobs.map(h => {
+    {historyPhone && <div className="modalBackdrop" onMouseDown={() => setHistoryPhone(null)}><div className="modal historyModal serviceHistoryModal" onMouseDown={e => e.stopPropagation()}><div className="modalHead"><div><h2>Müşteri Kartı</h2><p>{historyPhone} · {filteredHistoryJobs.length}/{historyJobs.length} servis kaydı</p></div><button onClick={() => setHistoryPhone(null)}>×</button></div>{historyJobs.length>0 && <div className="customerCardSummary"><div><span>Müşteri</span><b>{historyJobs[0].customer_name}</b></div><div><span>Telefon</span><b>{historyPhone}</b></div><div><span>Adresler</span><b>{Array.from(new Set(historyJobs.map(j=>j.customer_address).filter(Boolean))).length}</b></div><div><span>Toplam Servis</span><b>{historyJobs.length}</b></div><div><span>Son Servis</span><b>{new Date(historyJobs[0].scheduled_at).toLocaleDateString('tr-TR')}</b></div><div><span>Sonraki Bakım</span><b>{historyJobs.find(j=>j.next_maintenance_at)?.next_maintenance_at ? new Date(historyJobs.find(j=>j.next_maintenance_at)!.next_maintenance_at!).toLocaleDateString('tr-TR') : '-'}</b></div></div>}
+      <div className="historyToolbar">
+        <input value={historySearch} onChange={e => { setHistorySearch(e.target.value); setHistoryPage(1) }} placeholder="Servis no, açıklama, adres veya servis ara…" />
+        <select value={historyStatusFilter} onChange={e => { setHistoryStatusFilter(e.target.value as 'all' | Status); setHistoryPage(1) }}>
+          <option value="all">Tüm Durumlar</option>
+          <option value="pending">Bekliyor</option>
+          <option value="in_progress">İşlemde</option>
+          <option value="completed">Tamamlandı</option>
+          <option value="postponed">Ertelendi</option>
+        </select>
+      </div>
+      <div className="historyList">{pagedHistoryJobs.map(h => {
       const sr = serviceReports.find(r => r.job_id === h.id)
       const fileCount = attachments.filter(a => a.job_id === h.id).length
       return <article key={h.id} className="serviceHistoryCard">
