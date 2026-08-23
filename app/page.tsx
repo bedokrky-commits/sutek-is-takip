@@ -61,6 +61,12 @@ type ServiceReport = {
   created_at: string
   updated_at: string
 }
+type ServiceLiveStatus = {
+  user_id: string
+  status: 'available' | 'en_route' | 'on_site'
+  job_id?: string | null
+  updated_at: string
+}
 
 const statusText: Record<Status, string> = {
   pending: 'Bekliyor',
@@ -85,6 +91,7 @@ export default function Home() {
   const [profiles, setProfiles] = useState<Profile[]>([])
   const [jobHistory, setJobHistory] = useState<JobHistory[]>([])
   const [serviceReports, setServiceReports] = useState<ServiceReport[]>([])
+  const [serviceLiveStatuses, setServiceLiveStatuses] = useState<ServiceLiveStatus[]>([])
   const [jobComments, setJobComments] = useState<JobComment[]>([])
   const [attachments, setAttachments] = useState<Attachment[]>([])
   const [filesJob, setFilesJob] = useState<Job | null>(null)
@@ -166,11 +173,12 @@ export default function Home() {
       setRole(profile.role as Role)
     }
 
-    const [{ data: js }, { data: ns }, { data: hs }, { data: sr }, { data: cm }, { data: at }] = await Promise.all([
+    const [{ data: js }, { data: ns }, { data: hs }, { data: sr }, { data: sls }, { data: cm }, { data: at }] = await Promise.all([
       supabase.from('jobs').select('*, creator:profiles!jobs_created_by_fkey(full_name), assignee:profiles!jobs_assigned_to_fkey(full_name)').order('scheduled_at', { ascending: true }),
       supabase.from('notifications').select('*').eq('user_id', user.id).order('created_at', { ascending: false }).limit(30),
       supabase.from('job_status_history').select('id,job_id,new_status,created_at,changed_by,changer:profiles!job_status_history_changed_by_fkey(full_name,role)').order('created_at', { ascending: true }),
       supabase.from('service_reports').select('id,job_id,work_performed,parts_used,internal_note,created_by,updated_by,created_at,updated_at').order('updated_at', { ascending: false }),
+      supabase.from('service_live_status').select('user_id,status,job_id,updated_at'),
       supabase.from('job_comments').select('id,job_id,author_id,message,created_at,author:profiles!job_comments_author_id_fkey(full_name,role)').order('created_at', { ascending: true }),
       supabase.from('job_attachments').select('id,job_id,file_name,storage_path,mime_type,file_size,created_at').order('created_at', { ascending: false })
     ])
@@ -178,6 +186,7 @@ export default function Home() {
     setNotices((ns ?? []) as Notice[])
     setJobHistory((hs ?? []) as JobHistory[])
     setServiceReports((sr ?? []) as ServiceReport[])
+    setServiceLiveStatuses((sls ?? []) as ServiceLiveStatus[])
     setJobComments((cm ?? []) as JobComment[])
     setAttachments((at ?? []) as Attachment[])
 
@@ -261,6 +270,22 @@ export default function Home() {
       .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'service_reports' }, payload => {
         const id = String((payload.old as { id?: string })?.id || '')
         if (id) setServiceReports(current => current.filter(r => r.id !== id))
+      })
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'service_live_status' }, payload => {
+        const live = payload.new as ServiceLiveStatus
+        setServiceLiveStatuses(current => current.some(s => s.user_id === live.user_id)
+          ? current.map(s => s.user_id === live.user_id ? live : s)
+          : [...current, live])
+      })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'service_live_status' }, payload => {
+        const live = payload.new as ServiceLiveStatus
+        setServiceLiveStatuses(current => current.some(s => s.user_id === live.user_id)
+          ? current.map(s => s.user_id === live.user_id ? live : s)
+          : [...current, live])
+      })
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'service_live_status' }, payload => {
+        const userId = String((payload.old as { user_id?: string })?.user_id || '')
+        if (userId) setServiceLiveStatuses(current => current.filter(s => s.user_id !== userId))
       })
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'job_comments' }, payload => {
         const raw = payload.new as JobComment
@@ -795,6 +820,24 @@ export default function Home() {
     popup.document.close()
   }
 
+  async function setMyServiceLiveStatus(status: 'available' | 'en_route' | 'on_site', jobId?: string | null) {
+    if (!supabase || role !== 'service') return
+    const { data, error } = await supabase.rpc('set_my_service_status', {
+      p_status: status,
+      p_job_id: jobId || null
+    })
+    if (error) return showMessage(friendlyError('Servis durumu güncellenemedi: ' + error.message), 'error')
+    const live = data as ServiceLiveStatus | null
+    if (live?.user_id) {
+      setServiceLiveStatuses(current => current.some(s => s.user_id === live.user_id)
+        ? current.map(s => s.user_id === live.user_id ? live : s)
+        : [...current, live])
+    }
+    if (status === 'en_route') showMessage('Durumunuz: Yola Çıktı', 'success')
+    if (status === 'on_site') showMessage('Durumunuz: Serviste / İşlemde', 'success')
+    if (status === 'available') showMessage('Durumunuz: Müsait', 'success')
+  }
+
   async function addJobComment() {
     if (!supabase || !commentsJob || !commentDraft.trim()) return
     const message = commentDraft.trim()
@@ -1016,6 +1059,8 @@ export default function Home() {
   const serviceStatusRows = serviceProfiles.map(person => {
     const assigned = jobs.filter(j => j.assigned_to === person.id)
     const todayKey = new Date().toDateString()
+    const live = serviceLiveStatuses.find(s => s.user_id === person.id)
+    const liveJob = live?.job_id ? jobs.find(j => j.id === live.job_id) : null
     return {
       id: person.id,
       name: person.full_name,
@@ -1023,7 +1068,11 @@ export default function Home() {
       inProgress: assigned.filter(j => j.status === 'in_progress').length,
       completed: assigned.filter(j => j.status === 'completed').length,
       todayCompleted: assigned.filter(j => j.status === 'completed' && new Date(j.scheduled_at).toDateString() === todayKey).length,
-      postponed: assigned.filter(j => j.status === 'postponed').length
+      postponed: assigned.filter(j => j.status === 'postponed').length,
+      liveStatus: live?.status || 'available' as 'available' | 'en_route' | 'on_site',
+      liveJobId: live?.job_id || null,
+      liveJobCustomer: liveJob?.customer_name || null,
+      liveUpdatedAt: live?.updated_at || null
     }
   })
 
@@ -1111,8 +1160,8 @@ export default function Home() {
   const dashboardUnassigned = jobs
     .filter(j => j.status !== 'completed' && !j.assigned_to)
     .sort((a,b) => +new Date(a.scheduled_at) - +new Date(b.scheduled_at))
-  const dashboardAvailableServices = serviceStatusRows.filter(r => r.pending + r.inProgress === 0)
-  const dashboardWorkingServices = serviceStatusRows.filter(r => r.inProgress > 0)
+  const dashboardAvailableServices = serviceStatusRows.filter(r => r.liveStatus === 'available')
+  const dashboardWorkingServices = serviceStatusRows.filter(r => r.liveStatus === 'on_site')
   const dashboardAttentionMap = new Map<string, Job>()
   ;[...dashboardUrgent, ...dashboardLate].forEach(j => dashboardAttentionMap.set(j.id, j))
   const dashboardAttention = Array.from(dashboardAttentionMap.values())
@@ -1123,6 +1172,10 @@ export default function Home() {
       return +new Date(a.scheduled_at) - +new Date(b.scheduled_at)
     })
     .slice(0, 8)
+
+  const myLiveStatus = serviceLiveStatuses.find(s => s.user_id === currentUserId)
+  const myLiveJob = myLiveStatus?.job_id ? jobs.find(j => j.id === myLiveStatus.job_id) : null
+  const myLiveLabel = myLiveStatus?.status === 'en_route' ? 'Yola Çıktı' : myLiveStatus?.status === 'on_site' ? 'Serviste / İşlemde' : 'Müsait'
 
   const viewTitle =
     view === 'calendar' ? 'Takvim & Planlama' :
@@ -1177,6 +1230,10 @@ export default function Home() {
       {view === 'jobs' ? <>
         {role === 'service' && <div className="serviceOpsSummary">
           <div className="serviceOpsTitle"><div><h2>Servis Operasyon</h2><p>Kendinize atanmış işler listede otomatik olarak en üste gelir.</p></div><span>{myAssignedOpen.length} açık görev</span></div>
+          <div className={`myLiveStatusBar ${myLiveStatus?.status || 'available'}`}>
+            <div><span className="livePulse"></span><b>{myLiveLabel}</b><small>{myLiveJob ? `${myLiveJob.service_no || ''} · ${myLiveJob.customer_name}` : 'Aktif servis işi yok'}</small></div>
+            {myLiveStatus?.status && myLiveStatus.status !== 'available' && <button onClick={() => setMyServiceLiveStatus('available')}>Müsaitim</button>}
+          </div>
           <div className="serviceOpsCards">
             <article><span>Bana Atanan</span><strong>{myAssignedOpen.length}</strong></article>
             <article><span>Acil</span><strong>{myAssignedUrgent}</strong></article>
@@ -1225,6 +1282,11 @@ export default function Home() {
                   {job.customer_address && <button onClick={() => setNavigationJob(job)}>Navigasyon</button>}
                   <button onClick={() => setHistoryPhone(job.customer_phone)}>Müşteri Kartı</button>
                   <button onClick={() => openReport(job)}>{serviceReports.some(r => r.job_id === job.id) ? 'Servis Formu' : 'Servis Formu Oluştur'}</button>
+                  {role === 'service' && job.assigned_to === currentUserId && job.status !== 'completed' && job.status !== 'postponed' && <>
+                    {(!myLiveStatus || myLiveStatus.status === 'available' || myLiveStatus.job_id !== job.id) && <button className="enRouteBtn" onClick={() => setMyServiceLiveStatus('en_route', job.id)}>🚗 Yola Çıktım</button>}
+                    {myLiveStatus?.job_id === job.id && myLiveStatus.status === 'en_route' && <button className="onSiteBtn" onClick={() => setMyServiceLiveStatus('on_site', job.id)}>📍 Servisteyim</button>}
+                    {myLiveStatus?.job_id === job.id && myLiveStatus.status === 'on_site' && <span className="liveJobBadge">● Serviste</span>}
+                  </>}
                   {canOperate && job.status !== 'completed' && <>
                     {job.status !== 'in_progress' && <button onClick={() => setStatus(job, 'in_progress')}>İşleme Al</button>}
                     <button className="success" onClick={() => completeJob(job)}>✓ Tamamlandı</button>
@@ -1303,11 +1365,12 @@ export default function Home() {
                 <div className="serviceAvailabilityList">
                   {serviceStatusRows.length === 0 ? <div className="empty compactEmpty">Aktif servis personeli yok.</div> :
                     serviceStatusRows.map(row => {
-                      const available = row.pending + row.inProgress === 0
+                      const stateClass = row.liveStatus === 'available' ? 'available' : row.liveStatus === 'on_site' ? 'working' : 'enRoute'
+                      const stateText = row.liveStatus === 'available' ? 'Müsait' : row.liveStatus === 'on_site' ? 'Serviste' : 'Yolda'
                       return <article key={row.id}>
-                        <div className="serviceAvailabilityName"><span className={`availabilityDot ${available ? 'available' : row.inProgress > 0 ? 'working' : 'busy'}`}></span><b>{row.name}</b></div>
-                        <span className={`availabilityState ${available ? 'available' : row.inProgress > 0 ? 'working' : 'busy'}`}>{available ? 'Müsait' : row.inProgress > 0 ? 'İşlemde' : 'Görevli'}</span>
-                        <small>{row.pending} bekleyen · {row.inProgress} işlemde</small>
+                        <div className="serviceAvailabilityName"><span className={`availabilityDot ${stateClass}`}></span><b>{row.name}</b></div>
+                        <span className={`availabilityState ${stateClass}`}>{stateText}</span>
+                        <small>{row.liveJobCustomer ? `Aktif: ${row.liveJobCustomer} · ` : ''}{row.pending} bekleyen · {row.inProgress} işlemde</small>
                       </article>
                     })}
                 </div>

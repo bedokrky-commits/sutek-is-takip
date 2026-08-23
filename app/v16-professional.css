@@ -756,3 +756,40 @@ button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible,
   .operationJobActions button{flex:1}
   .monthlyOperationSummary{grid-template-columns:1fr 1fr}
 }
+
+
+/* v2.0 — Live service status */
+.myLiveStatusBar{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:12px;
+  border:1px solid #e4e8ee;
+  border-radius:11px;
+  padding:9px 11px;
+  margin-bottom:10px;
+  background:#fff;
+}
+.myLiveStatusBar>div{display:flex;align-items:center;gap:7px;min-width:0}
+.myLiveStatusBar b{font-size:12px}
+.myLiveStatusBar small{font-size:10px;color:#667085;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.myLiveStatusBar button{border:1px solid #d8dde5;background:#fff;border-radius:8px;padding:6px 9px;font-size:10px}
+.livePulse{width:9px;height:9px;border-radius:50%;display:inline-block}
+.myLiveStatusBar.available .livePulse{background:#22a06b;box-shadow:0 0 0 4px #e5f6ed}
+.myLiveStatusBar.en_route .livePulse{background:#dd9b21;box-shadow:0 0 0 4px #fff3d9}
+.myLiveStatusBar.on_site .livePulse{background:#3478c8;box-shadow:0 0 0 4px #e6f0fb}
+
+.enRouteBtn{background:#fff7e6!important;border-color:#efd7a6!important;color:#7f5600!important;font-weight:720!important}
+.onSiteBtn{background:#eaf2fc!important;border-color:#c6d9ef!important;color:#18598f!important;font-weight:720!important}
+.liveJobBadge{display:inline-flex;align-items:center;justify-content:center;min-height:31px;border-radius:9px;padding:6px 9px;background:#e8f1fb;color:#1a5d9d;font-size:10px;font-weight:750;border:1px solid #cadef1}
+
+.availabilityDot.enRoute{background:#dd9b21;box-shadow:0 0 0 3px #fff3d8}
+.availabilityState.enRoute{background:#fff3d8;color:#845800}
+
+@media(max-width:560px){
+  .myLiveStatusBar{align-items:flex-start;flex-direction:column}
+  .myLiveStatusBar>div{width:100%;flex-wrap:wrap}
+  .myLiveStatusBar small{width:100%;padding-left:16px}
+  .myLiveStatusBar button{width:100%;min-height:34px}
+  .liveJobBadge{width:100%}
+}
