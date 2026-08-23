@@ -855,3 +855,82 @@ button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible,
   }
   .serviceTimeRow{min-width:690px}
 }
+
+/* v2.2 — Daily performance & field shift tracking */
+.dailyPerformancePanel{margin-bottom:15px}
+.dailyPerformanceSummary{
+  display:grid;
+  grid-template-columns:repeat(4,1fr);
+  gap:8px;
+  padding:12px 14px;
+  border-bottom:1px solid #edf0f3;
+}
+.dailyPerformanceSummary article{
+  background:#f7f8fa;
+  border:1px solid #eceef2;
+  border-radius:10px;
+  padding:10px 11px;
+}
+.dailyPerformanceSummary span{
+  display:block;
+  font-size:9px;
+  color:#667085;
+  text-transform:uppercase;
+  letter-spacing:.025em;
+}
+.dailyPerformanceSummary strong{
+  display:block;
+  margin-top:4px;
+  font-size:18px;
+  color:#172033;
+}
+.dailyPerformanceTable{
+  width:100%;
+  overflow-x:auto;
+}
+.dailyPerformanceRow{
+  display:grid;
+  grid-template-columns:minmax(145px,1.2fr) 82px 76px 76px 48px 82px 82px 86px 92px 92px;
+  min-width:940px;
+  align-items:center;
+  border-bottom:1px solid #edf0f3;
+}
+.dailyPerformanceRow:last-child{border-bottom:0}
+.dailyPerformanceRow>*{
+  padding:10px 9px;
+  font-size:10px;
+}
+.dailyPerformanceRow>span:not(:nth-child(2)){text-align:center}
+.dailyPerformanceRow>b{font-size:11px}
+.dailyPerformanceHead{
+  background:#f7f8fb;
+  color:#667085;
+  font-weight:700;
+}
+.dailyPerformanceHead>span{text-align:center!important}
+.performanceStatus{
+  width:7px;
+  height:7px;
+  display:inline-block;
+  border-radius:50%;
+  margin-right:5px;
+  vertical-align:1px;
+}
+.performanceStatus.available{background:#22a06b}
+.performanceStatus.en_route{background:#dd9b21}
+.performanceStatus.on_site{background:#3478c8}
+.dailyPerformanceNote{
+  margin:0;
+  padding:9px 14px 11px;
+  color:#7a8494;
+  font-size:9px;
+  background:#fcfcfd;
+  border-top:1px solid #f0f1f3;
+}
+@media(max-width:700px){
+  .dailyPerformanceSummary{grid-template-columns:repeat(2,1fr)}
+}
+@media(max-width:460px){
+  .dailyPerformanceSummary{grid-template-columns:1fr 1fr;padding:9px}
+  .dailyPerformanceSummary strong{font-size:15px}
+}

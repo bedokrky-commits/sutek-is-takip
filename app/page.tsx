@@ -1100,6 +1100,9 @@ export default function Home() {
     if (hours <= 0) return `${minutes} dk`
     return `${hours} sa ${minutes} dk`
   }
+  const formatClock = (value?: string | null) => value
+    ? new Date(value).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })
+    : '-'
   const logTravelMs = (log: ServiceTimeLog) => durationMs(log.en_route_at, log.on_site_at || log.completed_at)
   const logServiceMs = (log: ServiceTimeLog) => log.on_site_at ? durationMs(log.on_site_at, log.completed_at) : 0
   const logTotalMs = (log: ServiceTimeLog) => durationMs(log.en_route_at || log.on_site_at, log.completed_at)
@@ -1201,6 +1204,54 @@ export default function Home() {
       avgMs: completedLogs.length ? Math.round(totalMs / completedLogs.length) : 0
     }
   }).filter(row => row.jobs > 0 || row.totalMs > 0).sort((a,b) => b.totalMs - a.totalMs)
+
+  const dailyPersonnelPerformance = serviceProfiles.map(person => {
+    const logs = serviceTimeLogs
+      .filter(log => log.user_id === person.id && isTodayLog(log))
+      .sort((a,b) => +new Date(a.en_route_at || a.on_site_at || a.created_at) - +new Date(b.en_route_at || b.on_site_at || b.created_at))
+
+    const completedLogs = logs.filter(log => Boolean(log.completed_at))
+    const firstDeparture = logs
+      .map(log => log.en_route_at)
+      .filter(Boolean)
+      .sort((a,b) => +new Date(a!) - +new Date(b!))[0] || null
+    const lastCompletion = completedLogs
+      .map(log => log.completed_at)
+      .filter(Boolean)
+      .sort((a,b) => +new Date(b!) - +new Date(a!))[0] || null
+
+    const travelMs = logs.reduce((sum, log) => sum + logTravelMs(log), 0)
+    const serviceMs = logs.reduce((sum, log) => sum + logServiceMs(log), 0)
+    const activeMs = logs.reduce((sum, log) => sum + logTotalMs(log), 0)
+    const shiftEndMs = lastCompletion ? new Date(lastCompletion).getTime() : (firstDeparture ? clockTick : 0)
+    const fieldShiftMs = firstDeparture ? Math.max(0, shiftEndMs - new Date(firstDeparture).getTime()) : 0
+    const live = serviceLiveStatuses.find(s => s.user_id === person.id)
+    const liveLabel = live?.status === 'en_route' ? 'Yolda' : live?.status === 'on_site' ? 'Serviste' : 'Müsait'
+
+    return {
+      id: person.id,
+      name: person.full_name,
+      completedJobs: completedLogs.length,
+      firstDeparture,
+      lastCompletion,
+      travelMs,
+      serviceMs,
+      activeMs,
+      avgServiceMs: completedLogs.length ? Math.round(serviceMs / completedLogs.length) : 0,
+      fieldShiftMs,
+      liveLabel,
+      liveStatus: live?.status || 'available'
+    }
+  }).sort((a,b) => {
+    if (a.liveStatus !== 'available' && b.liveStatus === 'available') return -1
+    if (a.liveStatus === 'available' && b.liveStatus !== 'available') return 1
+    return b.activeMs - a.activeMs
+  })
+
+  const dailyCompletedTotal = dailyPersonnelPerformance.reduce((sum, row) => sum + row.completedJobs, 0)
+  const dailyActiveTotalMs = dailyPersonnelPerformance.reduce((sum, row) => sum + row.activeMs, 0)
+  const dailyTravelTotalMs = dailyPersonnelPerformance.reduce((sum, row) => sum + row.travelMs, 0)
+  const dailyServiceTotalMs = dailyPersonnelPerformance.reduce((sum, row) => sum + row.serviceMs, 0)
 
   const maintenanceJobs = jobs.filter(j => j.next_maintenance_at).sort((a,b) => +new Date(a.next_maintenance_at!) - +new Date(b.next_maintenance_at!))
   const dueMaintenance = maintenanceJobs.filter(j => new Date(j.next_maintenance_at!).getTime() <= Date.now() + 30 * 86400000)
@@ -1465,6 +1516,40 @@ export default function Home() {
                   )}</div>}
               </div>
             </div>
+          </div>
+
+          <div className="panel dailyPerformancePanel">
+            <div className="panelHead">
+              <div>
+                <h2>Günlük Personel Performansı</h2>
+                <p className="muted">Bugünkü saha hareketleri ve servis süreleri</p>
+              </div>
+              <span>{new Date().toLocaleDateString('tr-TR')}</span>
+            </div>
+            <div className="dailyPerformanceSummary">
+              <article><span>Tamamlanan İş</span><strong>{dailyCompletedTotal}</strong></article>
+              <article><span>Toplam Aktif Süre</span><strong>{formatDuration(dailyActiveTotalMs)}</strong></article>
+              <article><span>Toplam Yol</span><strong>{formatDuration(dailyTravelTotalMs)}</strong></article>
+              <article><span>Toplam Servis</span><strong>{formatDuration(dailyServiceTotalMs)}</strong></article>
+            </div>
+            <div className="dailyPerformanceTable">
+              <div className="dailyPerformanceRow dailyPerformanceHead">
+                <span>Personel</span><span>Durum</span><span>İlk Çıkış</span><span>Son Bitiş</span><span>İş</span><span>Yolda</span><span>Serviste</span><span>Aktif</span><span>Saha Mesaisi</span><span>Ort. Servis</span>
+              </div>
+              {dailyPersonnelPerformance.map(row => <div className="dailyPerformanceRow" key={row.id}>
+                <b>{row.name}</b>
+                <span><i className={`performanceStatus ${row.liveStatus}`}></i>{row.liveLabel}</span>
+                <span>{formatClock(row.firstDeparture)}</span>
+                <span>{formatClock(row.lastCompletion)}</span>
+                <span>{row.completedJobs}</span>
+                <span>{formatDuration(row.travelMs)}</span>
+                <span>{formatDuration(row.serviceMs)}</span>
+                <span><b>{formatDuration(row.activeMs)}</b></span>
+                <span>{formatDuration(row.fieldShiftMs)}</span>
+                <span>{formatDuration(row.avgServiceMs)}</span>
+              </div>)}
+            </div>
+            <p className="dailyPerformanceNote">Saha mesaisi, ilk “Yola Çıktım” kaydı ile son tamamlanan iş arasındaki süredir; resmi puantaj/bordro mesaisi değildir.</p>
           </div>
 
           <div className="dashboardGrid operationLowerGrid">

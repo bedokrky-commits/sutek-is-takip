@@ -1,0 +1,3 @@
+-- v2.2 daily performance & field shift tracking
+-- No schema change required.
+-- Uses public.service_time_logs introduced in v2.1.
