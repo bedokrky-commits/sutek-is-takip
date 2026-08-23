@@ -508,3 +508,43 @@ button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible,
     grid-template-columns:repeat(2,1fr);
   }
 }
+
+
+/* v1.7.1 — Other Actions dropdown overflow fix */
+.jobsPanel{
+  overflow:visible;
+}
+.jobsPanel .jobList{
+  overflow:visible;
+}
+.jobsPanel .job{
+  overflow:visible;
+}
+.moreActions{
+  z-index:30;
+}
+.moreActions[open]{
+  z-index:60;
+}
+.moreActionsMenu{
+  max-height:min(420px,65vh);
+  overflow-y:auto;
+  overscroll-behavior:contain;
+  scrollbar-width:thin;
+}
+.moreActionsMenu::-webkit-scrollbar{
+  width:7px;
+}
+.moreActionsMenu::-webkit-scrollbar-thumb{
+  background:#cbd0d8;
+  border-radius:999px;
+}
+.moreActionsMenu::-webkit-scrollbar-track{
+  background:transparent;
+}
+@media(max-width:560px){
+  .moreActionsMenu{
+    max-height:52vh;
+    overflow-y:auto;
+  }
+}

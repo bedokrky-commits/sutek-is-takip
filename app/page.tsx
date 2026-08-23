@@ -1181,7 +1181,7 @@ export default function Home() {
           <article><span>Ertelenen</span><strong>{jobs.filter(j => j.status === 'postponed').length}</strong></article>
         </div>
 
-        <div className="panel">
+        <div className="panel jobsPanel">
           <div className="panelHead jobPanelHead">
             <div><h2>{filter === 'bugun' ? 'Bugünün İşleri' : filter === 'bekleyen' ? 'Bekleyen İşler' : 'Tamamlanan İşler'}</h2><input className="searchInput" value={search} onChange={e=>setSearch(e.target.value)} placeholder="Müşteri, telefon, servis veya iş ara…" /></div>
             <div className="quickFilters"><button className={jobQuickFilter==='all'?'selected':''} onClick={()=>setJobQuickFilter('all')}>Tümü</button><button className={jobQuickFilter==='urgent'?'selected':''} onClick={()=>setJobQuickFilter('urgent')}>Acil</button><button className={jobQuickFilter==='late'?'selected':''} onClick={()=>setJobQuickFilter('late')}>Geciken</button><button className={jobQuickFilter==='upcoming'?'selected':''} onClick={()=>setJobQuickFilter('upcoming')}>Yaklaşan</button><span>{displayJobs.length} kayıt</span></div>
