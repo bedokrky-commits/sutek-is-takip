@@ -19,3 +19,152 @@ button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible,
 @media(max-width:900px){.sidebar{width:100%;position:static;padding:12px 12px 10px;box-shadow:none}.shell{display:block}.content{margin-left:0;padding:16px}.brand{border-bottom:0;padding:0 4px 11px}.sidebar nav{display:flex;overflow-x:auto;gap:6px;padding-bottom:3px;scrollbar-width:none}.sidebar nav::-webkit-scrollbar{display:none}.sidebar nav button{flex:0 0 auto;min-width:max-content;text-align:center;padding:9px 11px;border-radius:9px;font-size:11px}.sidebarBottom{display:none}.job{grid-template-columns:70px minmax(0,1fr);border:1px solid #e4e7ec;border-radius:14px;margin:9px;padding:14px;box-shadow:0 5px 16px rgba(16,24,40,.04)}.actions{padding-left:0;grid-column:1/-1;border-top:1px solid #eef0f3;padding-top:10px}}
 @media(max-width:560px){.content{padding:11px}.topbar{gap:10px;margin-bottom:12px}.topbar h1{font-size:22px}.topbar p{font-size:11px}.topActions{gap:6px}.topActions button{padding:8px 10px;font-size:11px}.sidebar .brandLogo{width:72px}.stats{gap:7px;margin-bottom:12px}.stats article{padding:12px;border-radius:12px}.stats strong{font-size:23px}.stats span{font-size:9px}.panel{border-radius:14px}.panelHead{padding:13px 14px}.panelHead h2{font-size:15px}.job{display:grid;grid-template-columns:1fr;margin:8px 0;border-radius:13px;padding:13px;gap:9px}.time{border:0;border-bottom:1px solid #edf0f3;padding-bottom:7px;flex-direction:row;align-items:center;gap:7px}.time strong{font-size:17px}.jobTitle{gap:6px;flex-wrap:wrap}.jobInfo h3{font-size:15px}.jobInfo p{font-size:12px;margin-bottom:7px}.jobMeta small{font-size:9px}.actions{grid-column:auto;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;padding-top:9px}.actions button,.actions .actionLink{width:100%;min-height:35px;display:flex;align-items:center;justify-content:center;text-align:center;font-size:10px;padding:6px 7px}.quickFilters{width:100%;display:flex;overflow-x:auto;flex-wrap:nowrap;scrollbar-width:none}.quickFilters::-webkit-scrollbar{display:none}.quickFilters button{flex:0 0 auto}.modalBackdrop{padding:10px;align-items:end}.modal{width:100%;max-height:92vh;overflow:auto;border-radius:20px 20px 10px 10px;padding:17px}.serviceOpsCards,.dashboardCards{grid-template-columns:repeat(2,1fr)}.calendarGrid.month,.calendarGrid.week{min-width:720px}.calendarPanel{overflow-x:auto}}
 @media(max-width:380px){.content{padding:8px}.actions{grid-template-columns:1fr}.topbar{flex-direction:column}.topActions{width:100%;justify-content:flex-end}}
+
+
+/* v1.6.1 — Main screen density optimization */
+.serviceStatusPanel{
+  padding:12px 14px;
+  margin-bottom:12px;
+}
+.serviceStatusPanel .serviceOpsTitle{
+  margin-bottom:8px;
+  align-items:center;
+}
+.serviceStatusPanel .serviceOpsTitle h2{
+  font-size:15px;
+}
+.serviceStatusPanel .serviceOpsTitle p{
+  display:none;
+}
+.serviceStatusPanel .serviceOpsTitle>span{
+  font-size:10px;
+}
+.serviceStatusGrid{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(260px,1fr));
+  gap:8px;
+}
+.serviceStatusGrid article{
+  padding:10px 12px;
+  border-radius:10px;
+  display:grid;
+  grid-template-columns:minmax(120px,.8fr) 1.2fr;
+  align-items:center;
+  gap:10px;
+}
+.serviceStatusGrid h3{
+  margin:0;
+  font-size:13px;
+}
+.serviceStatusGrid article>div{
+  display:grid;
+  grid-template-columns:repeat(4,minmax(72px,1fr));
+  gap:5px;
+}
+.serviceStatusGrid span{
+  font-size:9px;
+  padding:5px 6px;
+  text-align:center;
+  white-space:nowrap;
+}
+.serviceStatusGrid b{
+  font-size:13px;
+}
+
+.stats{
+  margin-bottom:12px;
+}
+.stats article{
+  padding:13px 15px;
+  min-height:92px;
+}
+.stats strong{
+  font-size:25px;
+}
+.stats span{
+  font-size:9px;
+}
+
+.jobPanelHead{
+  display:grid;
+  grid-template-columns:minmax(320px,1fr) auto;
+  gap:16px;
+  align-items:end;
+}
+.jobPanelHead>div:first-child{
+  min-width:0;
+}
+.jobPanelHead .searchInput{
+  width:min(520px,100%);
+  margin-top:8px;
+}
+.jobPanelHead .quickFilters{
+  display:flex;
+  flex-direction:row;
+  align-items:center;
+  justify-content:flex-end;
+  gap:6px;
+  flex-wrap:wrap;
+  align-self:end;
+}
+.jobPanelHead .quickFilters button{
+  padding:7px 10px;
+  border-radius:8px;
+}
+.jobPanelHead .quickFilters>span{
+  margin-left:4px;
+  white-space:nowrap;
+}
+
+.panelHead.jobPanelHead{
+  padding-top:15px;
+  padding-bottom:15px;
+}
+
+@media(min-width:901px){
+  .serviceStatusPanel+.stats{
+    margin-top:0;
+  }
+}
+
+@media(max-width:1100px){
+  .jobPanelHead{
+    grid-template-columns:1fr;
+    align-items:start;
+  }
+  .jobPanelHead .quickFilters{
+    justify-content:flex-start;
+  }
+  .serviceStatusGrid article{
+    grid-template-columns:1fr;
+  }
+}
+
+@media(max-width:700px){
+  .serviceStatusPanel{
+    padding:11px;
+  }
+  .serviceStatusGrid{
+    grid-template-columns:1fr;
+  }
+  .serviceStatusGrid article{
+    grid-template-columns:1fr;
+  }
+  .serviceStatusGrid article>div{
+    grid-template-columns:repeat(2,1fr);
+  }
+  .jobPanelHead{
+    display:flex;
+    flex-direction:column;
+    align-items:stretch;
+  }
+  .jobPanelHead .quickFilters{
+    width:100%;
+    justify-content:flex-start;
+    overflow-x:auto;
+    flex-wrap:nowrap;
+  }
+  .stats article{
+    min-height:78px;
+  }
+}
