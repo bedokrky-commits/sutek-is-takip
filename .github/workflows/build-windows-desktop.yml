@@ -1,0 +1,42 @@
+name: Build SUTEK Windows Desktop
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'desktop-app/**'
+      - '.github/workflows/build-windows-desktop.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        working-directory: desktop-app
+        run: npm install
+
+      - name: Build Windows installer
+        working-directory: desktop-app
+        run: npm run dist:win
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: SUTEK-Is-Takip-Windows-Setup
+          path: desktop-app/dist/*.exe
+          if-no-files-found: error
+          retention-days: 30
