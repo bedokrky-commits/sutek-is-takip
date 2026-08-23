@@ -313,3 +313,198 @@ button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible,
     font-size:12px;
   }
 }
+
+
+/* v1.7 — Smart job actions */
+.smartActions{
+  display:flex;
+  flex-direction:column;
+  align-items:stretch;
+  gap:7px;
+  min-width:300px;
+}
+.primaryJobActions{
+  display:flex;
+  gap:5px;
+  align-items:center;
+  justify-content:flex-end;
+  flex-wrap:wrap;
+}
+.primaryJobActions button,
+.primaryJobActions .actionLink{
+  min-height:31px;
+}
+.moreActions{
+  position:relative;
+  align-self:flex-end;
+}
+.moreActions summary{
+  list-style:none;
+  cursor:pointer;
+  user-select:none;
+  border:1px solid #dfe3e9;
+  background:#f7f8fa;
+  color:#485160;
+  border-radius:9px;
+  padding:6px 10px;
+  font-size:10px;
+  font-weight:700;
+  text-align:center;
+}
+.moreActions summary::-webkit-details-marker{display:none}
+.moreActions summary:after{
+  content:" ▾";
+  color:#7b8493;
+}
+.moreActions[open] summary{
+  border-color:#bcc3cf;
+  background:#eef1f5;
+}
+.moreActionsMenu{
+  position:absolute;
+  z-index:25;
+  right:0;
+  top:calc(100% + 6px);
+  width:210px;
+  background:#fff;
+  border:1px solid #dfe3e9;
+  border-radius:12px;
+  box-shadow:0 16px 42px rgba(15,23,42,.17);
+  padding:7px;
+  display:grid;
+  gap:5px;
+}
+.moreActionsMenu button{
+  width:100%;
+  text-align:left;
+  justify-content:flex-start;
+  padding:8px 9px;
+  min-height:32px;
+  border-radius:8px;
+}
+.moreActionsMenu .dangerBtn{
+  margin-top:3px;
+  border-top-color:#f0cac7!important;
+}
+.smartActions .roleHint{
+  align-self:flex-end;
+  font-size:9px;
+}
+
+/* Dashboard service load */
+.smartServiceLoad{
+  padding:8px 12px 12px;
+  display:grid;
+  gap:8px;
+}
+.dashboardServiceList .serviceLoadRow{
+  display:grid;
+  grid-template-columns:minmax(130px,.6fr) 1.4fr;
+  gap:12px;
+  align-items:center;
+  padding:10px 11px;
+  border:1px solid #e8ebf0;
+  border-radius:10px;
+  background:#fff;
+}
+.serviceLoadRow>b{
+  font-size:13px;
+}
+.serviceLoadMetrics{
+  display:grid;
+  grid-template-columns:repeat(4,1fr);
+  gap:6px;
+}
+.serviceLoadMetrics span{
+  display:flex!important;
+  flex-direction:column;
+  gap:2px;
+  text-align:center!important;
+  border:1px solid #eceef2;
+  background:#f7f8fa;
+  border-radius:8px;
+  padding:7px 5px;
+  font-size:9px!important;
+  color:#667085!important;
+}
+.serviceLoadMetrics strong{
+  font-size:15px;
+  color:#172033;
+}
+
+/* completed jobs keep only concise primary controls */
+.job:has(.badge.completed) .primaryJobActions{
+  justify-content:flex-end;
+}
+
+/* Tablet */
+@media(max-width:1100px){
+  .smartActions{
+    min-width:0;
+    width:100%;
+  }
+  .primaryJobActions{
+    justify-content:flex-start;
+  }
+  .moreActions{
+    align-self:flex-start;
+  }
+  .moreActionsMenu{
+    right:auto;
+    left:0;
+  }
+}
+
+/* Mobile */
+@media(max-width:560px){
+  .smartActions{
+    display:block;
+    border-top:1px solid #eef0f3;
+    padding-top:8px;
+  }
+  .primaryJobActions{
+    display:grid;
+    grid-template-columns:repeat(2,minmax(0,1fr));
+    gap:5px;
+  }
+  .primaryJobActions button,
+  .primaryJobActions .actionLink{
+    width:100%;
+    min-height:35px;
+  }
+  .moreActions{
+    margin-top:7px;
+    width:100%;
+  }
+  .moreActions summary{
+    width:100%;
+    min-height:35px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    font-size:10px;
+  }
+  .moreActionsMenu{
+    position:static;
+    width:100%;
+    margin-top:6px;
+    box-shadow:none;
+    border-radius:9px;
+    grid-template-columns:repeat(2,minmax(0,1fr));
+  }
+  .moreActionsMenu button{
+    text-align:center;
+    justify-content:center;
+  }
+  .smartActions .roleHint{
+    display:block;
+    margin-top:6px;
+    text-align:center;
+  }
+  .dashboardServiceList .serviceLoadRow{
+    grid-template-columns:1fr;
+  }
+  .serviceLoadMetrics{
+    grid-template-columns:repeat(2,1fr);
+  }
+}

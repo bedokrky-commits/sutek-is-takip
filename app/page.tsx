@@ -1015,12 +1015,14 @@ export default function Home() {
 
   const serviceStatusRows = serviceProfiles.map(person => {
     const assigned = jobs.filter(j => j.assigned_to === person.id)
+    const todayKey = new Date().toDateString()
     return {
       id: person.id,
       name: person.full_name,
       pending: assigned.filter(j => j.status === 'pending').length,
       inProgress: assigned.filter(j => j.status === 'in_progress').length,
       completed: assigned.filter(j => j.status === 'completed').length,
+      todayCompleted: assigned.filter(j => j.status === 'completed' && new Date(j.scheduled_at).toDateString() === todayKey).length,
       postponed: assigned.filter(j => j.status === 'postponed').length
     }
   })
@@ -1198,25 +1200,33 @@ export default function Home() {
                 <p>{job.description}</p>
                 <div className="jobMeta"><small>Servis No: <b>{job.service_no || '-'}</b></small><small>Ekleyen: <b>{job.creator?.full_name || job.created_by_name || 'SUTEK Personeli'}</b></small><small className={job.assigned_to === currentUserId ? 'assignedMe' : ''}>Servis: <b>{job.assignee?.full_name || 'Atanmadı'}</b></small></div>
               </div>
-              <div className="actions">
-                {canSchedule && <button onClick={() => setEditJob(job)}>Düzenle</button>}
-                <a className="actionLink" href={`tel:${job.customer_phone}`}>Ara</a>
-                {job.customer_address && <button onClick={() => setNavigationJob(job)}>Navigasyon</button>}
-                <button onClick={() => setHistoryPhone(job.customer_phone)}>Müşteri Kartı</button>
-                <button onClick={() => setCommentsJob(job)}>Notlar ({jobComments.filter(c => c.job_id === job.id).length})</button>
-                <button onClick={() => setSignatureJob(job)}>{job.signature_path ? 'İmzayı Gör/Yenile' : 'Müşteri İmzası'}</button>
-                <button onClick={() => setFilesJob(job)}>Dosyalar ({attachments.filter(a => a.job_id === job.id).length})</button>
-                <button onClick={() => uploadJobFile(job)} disabled={fileBusy}>+ Dosya</button>
-                <button onClick={() => openReport(job)}>{serviceReports.some(r => r.job_id === job.id) ? 'Servis Formu' : 'Servis Formu Oluştur'}</button>
-                {serviceReports.some(r => r.job_id === job.id) && <button onClick={() => printServiceForm(job)}>PDF</button>}
-                {job.customer_report && <button className="whatsappBtn" onClick={() => whatsappCustomerReport(job)}>WhatsApp</button>}
-                {canOperate && job.status !== 'completed' && <>
-                  {job.status !== 'in_progress' && <button onClick={() => setStatus(job, 'in_progress')}>İşleme Al</button>}
-                  <button className="success" onClick={() => completeJob(job)}>✓ Tamamlandı</button>
-                  {job.status !== 'postponed' && <button className="warning" onClick={() => setStatus(job, 'postponed')}>↻ Ertele</button>}
-                </>}
-                {canSchedule && job.status === 'postponed' && <button className="primary" onClick={() => rescheduleJob(job)}>📅 Tarih Belirle</button>}
-                {canSchedule && <button className="dangerBtn" onClick={() => deleteJob(job)}>Sil</button>}
+              <div className="actions smartActions">
+                <div className="primaryJobActions">
+                  <a className="actionLink" href={`tel:${job.customer_phone}`}>Ara</a>
+                  {job.customer_address && <button onClick={() => setNavigationJob(job)}>Navigasyon</button>}
+                  <button onClick={() => setHistoryPhone(job.customer_phone)}>Müşteri Kartı</button>
+                  <button onClick={() => openReport(job)}>{serviceReports.some(r => r.job_id === job.id) ? 'Servis Formu' : 'Servis Formu Oluştur'}</button>
+                  {canOperate && job.status !== 'completed' && <>
+                    {job.status !== 'in_progress' && <button onClick={() => setStatus(job, 'in_progress')}>İşleme Al</button>}
+                    <button className="success" onClick={() => completeJob(job)}>✓ Tamamlandı</button>
+                    {job.status !== 'postponed' && <button className="warning" onClick={() => setStatus(job, 'postponed')}>↻ Ertele</button>}
+                  </>}
+                  {canSchedule && job.status === 'postponed' && <button className="primary" onClick={() => rescheduleJob(job)}>📅 Tarih Belirle</button>}
+                </div>
+
+                <details className="moreActions">
+                  <summary>Diğer İşlemler</summary>
+                  <div className="moreActionsMenu">
+                    {canSchedule && <button onClick={() => setEditJob(job)}>Düzenle</button>}
+                    <button onClick={() => setCommentsJob(job)}>Notlar ({jobComments.filter(c => c.job_id === job.id).length})</button>
+                    <button onClick={() => setSignatureJob(job)}>{job.signature_path ? 'İmzayı Gör/Yenile' : 'Müşteri İmzası'}</button>
+                    <button onClick={() => setFilesJob(job)}>Dosyalar ({attachments.filter(a => a.job_id === job.id).length})</button>
+                    <button onClick={() => uploadJobFile(job)} disabled={fileBusy}>+ Dosya</button>
+                    {serviceReports.some(r => r.job_id === job.id) && <button onClick={() => printServiceForm(job)}>PDF</button>}
+                    {job.customer_report && <button className="whatsappBtn" onClick={() => whatsappCustomerReport(job)}>WhatsApp</button>}
+                    {canSchedule && <button className="dangerBtn" onClick={() => deleteJob(job)}>Sil</button>}
+                  </div>
+                </details>
                 {role === 'office' && job.status !== 'postponed' && job.status !== 'completed' && <span className="roleHint">Durumu servis günceller</span>}
               </div>
             </article>})}</div>}
@@ -1246,7 +1256,7 @@ export default function Home() {
           </div>
           <div className="dashboardGrid">
             <div className="panel"><div className="panelHead"><div><h2>Son 7 Gün</h2><p className="muted">Günlük iş ve tamamlanma özeti</p></div></div><div className="weekSummary">{dashboardLast7.map(x=><article key={x.d.toISOString()}><span>{x.d.toLocaleDateString('tr-TR',{weekday:'short'})}</span><strong>{x.count}</strong><small>{x.completed} tamamlandı</small></article>)}</div></div>
-            <div className="panel"><div className="panelHead"><div><h2>Servis Yükü</h2><p className="muted">Personel bazında atanan işler</p></div></div><div className="dashboardServiceList">{serviceStatusRows.map(row=><div key={row.id}><b>{row.name}</b><span>{row.pending} bekliyor · {row.inProgress} işlemde · {row.completed} tamamlandı</span></div>)}</div></div>
+            <div className="panel"><div className="panelHead"><div><h2>Servis Yükü</h2><p className="muted">Personel bazında güncel görev durumu</p></div></div><div className="dashboardServiceList smartServiceLoad">{serviceStatusRows.map(row=><div key={row.id} className="serviceLoadRow"><b>{row.name}</b><div className="serviceLoadMetrics"><span><strong>{row.pending}</strong> Bekleyen</span><span><strong>{row.inProgress}</strong> İşlemde</span><span><strong>{row.todayCompleted}</strong> Bugün Tamamlanan</span><span><strong>{row.postponed}</strong> Ertelenen</span></div></div>)}</div></div>
           </div>
         </>
       : view === 'maintenance' && canSeeReports ?
