@@ -168,3 +168,148 @@ button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible,
     min-height:78px;
   }
 }
+
+
+/* v1.6.2 — Faster job scanning */
+.job{
+  padding-top:14px;
+  padding-bottom:14px;
+  min-height:0;
+}
+.time{
+  justify-content:flex-start;
+}
+.time strong{
+  font-size:20px;
+  line-height:1.05;
+}
+.time small{
+  font-size:10px;
+  margin-top:3px;
+}
+.jobTitle{
+  gap:7px;
+  margin-bottom:2px;
+}
+.jobInfo h3{
+  font-size:16px;
+  line-height:1.2;
+  font-weight:760;
+}
+.jobInfo>a{
+  margin:3px 0 2px;
+  font-size:12px;
+}
+.jobInfo p{
+  margin:5px 0 6px;
+  font-size:12px;
+  line-height:1.38;
+  color:#485160;
+}
+.jobAddress{
+  margin:3px 0 2px;
+  padding:4px 7px;
+  font-size:10px;
+}
+.jobMeta{
+  margin-top:5px;
+  gap:5px;
+}
+.jobMeta small{
+  padding:4px 6px;
+  font-size:9px;
+  border-radius:6px;
+}
+.badge,.priorityBadge,.lateBadge,.upcomingBadge{
+  font-size:9px;
+  padding:4px 7px;
+}
+.actions{
+  gap:5px;
+  align-content:flex-start;
+}
+.actions button,.actions .actionLink{
+  padding:6px 8px;
+  min-height:30px;
+  font-size:10px;
+}
+.actions .success{
+  font-weight:760;
+}
+
+/* Make service status truly one-line on desktop */
+@media(min-width:1200px){
+  .serviceStatusGrid article{
+    grid-template-columns:minmax(120px,.65fr) 1.35fr;
+  }
+  .serviceStatusGrid article>div{
+    grid-template-columns:repeat(4,1fr);
+  }
+  .serviceStatusGrid span{
+    padding:4px 5px;
+  }
+}
+
+/* Reduce empty list height */
+.panel .empty{
+  padding:32px 20px;
+}
+.jobList:empty + .empty{
+  padding:28px 20px;
+}
+
+/* Dense desktop job rows */
+@media(min-width:1101px){
+  .job{
+    grid-template-columns:82px minmax(0,1fr) minmax(280px,auto);
+  }
+  .actions{
+    max-width:360px;
+  }
+}
+
+/* Tablet */
+@media(max-width:1100px) and (min-width:561px){
+  .job{
+    padding:13px 14px;
+  }
+  .actions{
+    padding-top:8px;
+  }
+}
+
+/* Mobile emphasis */
+@media(max-width:560px){
+  .job{
+    padding:12px;
+    gap:8px;
+  }
+  .time{
+    padding-bottom:6px;
+  }
+  .jobInfo h3{
+    font-size:14px;
+  }
+  .jobInfo>a{
+    font-size:11px;
+  }
+  .jobInfo p{
+    font-size:11px;
+    line-height:1.35;
+  }
+  .jobMeta{
+    margin-top:4px;
+  }
+  .actions{
+    gap:5px;
+    padding-top:8px;
+  }
+  .actions button,.actions .actionLink{
+    min-height:34px;
+    font-size:10px;
+  }
+  .panel .empty{
+    padding:24px 14px;
+    font-size:12px;
+  }
+}
