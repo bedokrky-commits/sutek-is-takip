@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SUTEK İş Takip</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;display:grid;place-items:center;background:#f3f5f9;color:#101828;font-family:Segoe UI,Arial,sans-serif;padding:24px}
+.card{width:min(620px,100%);background:white;border:1px solid #e6e9ef;border-radius:20px;box-shadow:0 24px 70px rgba(16,24,40,.12);padding:32px}
+.logoWrap{text-align:center;margin-bottom:20px}
+.logoWrap img{width:220px;max-width:75%;height:auto}
+h1{text-align:center;font-size:25px;margin:0 0 8px}
+.desc{text-align:center;color:#667085;font-size:14px;line-height:1.55;margin:0 auto 24px;max-width:500px}
+label{display:block;font-size:12px;font-weight:700;margin-bottom:7px}
+input{width:100%;height:46px;border:1px solid #d0d5dd;border-radius:11px;padding:0 13px;font-size:14px;outline:none}
+input:focus{border-color:#4652d6;box-shadow:0 0 0 3px rgba(70,82,214,.12)}
+button{width:100%;height:46px;margin-top:12px;border:0;border-radius:11px;background:#4652d6;color:white;font-size:14px;font-weight:750;cursor:pointer}
+button:hover{filter:brightness(1.04)}
+.note{margin-top:16px;padding:12px 14px;background:#f7f8fa;border:1px solid #eceef2;border-radius:10px;color:#667085;font-size:12px;line-height:1.5}
+.error{display:none;margin-bottom:14px;padding:11px 13px;background:#fff2f1;color:#9b2c24;border:1px solid #f5d0cc;border-radius:10px;font-size:12px}
+.small{font-size:11px;color:#98a2b3;margin-top:12px;text-align:center}
+</style>
+</head>
+<body>
+<main class="card">
+  <div class="logoWrap"><img src="assets/sutek.png" alt="SUTEK"></div>
+  <h1>SUTEK İş Takip</h1>
+  <p class="desc">Windows masaüstü uygulaması ilk kurulumda canlı İş Takip adresinizi bir kez kaydeder. Sonraki açılışlarda doğrudan uygulamaya girer.</p>
+  <div id="error" class="error"></div>
+  <form id="form">
+    <label for="url">SUTEK İş Takip web adresi</label>
+    <input id="url" type="url" placeholder="https://...vercel.app" required autocomplete="url">
+    <button type="submit">Kaydet ve Uygulamayı Aç</button>
+  </form>
+  <div class="note"><b>Adres nerede?</b><br>Chrome'da çalışan SUTEK İş Takip uygulamasını açıp üstteki adres çubuğunda yazan <b>https://...</b> adresini buraya yapıştırın.</div>
+  <div class="small">Bu ayar yalnızca bu bilgisayarda saklanır.</div>
+</main>
+<script>
+const form = document.getElementById('form')
+const input = document.getElementById('url')
+const errorBox = document.getElementById('error')
+
+async function init(){
+  const settings = await window.sutekDesktop.getSettings()
+  if(settings.appUrl) input.value = settings.appUrl
+
+  const q = new URLSearchParams(location.search)
+  if(q.get('current')) input.value = q.get('current')
+  if(q.get('error') === '1'){
+    showError('Kayıtlı adrese ulaşılamadı. Adresi kontrol edip tekrar kaydedin.')
+  }
+}
+
+function showError(msg){
+  errorBox.textContent = msg
+  errorBox.style.display = 'block'
+}
+
+form.addEventListener('submit', async (e)=>{
+  e.preventDefault()
+  errorBox.style.display='none'
+  try{
+    await window.sutekDesktop.saveUrl(input.value)
+  }catch(err){
+    showError(err?.message || 'Adres kaydedilemedi.')
+  }
+})
+
+init()
+</script>
+</body>
+</html>

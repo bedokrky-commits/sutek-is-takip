@@ -1,0 +1,53 @@
+{
+  "name": "sutek-is-takip-desktop",
+  "version": "2.5.0",
+  "description": "SUTEK İş Takip Windows Masaüstü Uygulaması",
+  "main": "main.js",
+  "author": "SUTEK",
+  "license": "UNLICENSED",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dist:win": "electron-builder --win nsis --x64"
+  },
+  "dependencies": {
+    "electron": "38.2.0"
+  },
+  "devDependencies": {
+    "electron-builder": "26.0.12"
+  },
+  "build": {
+    "appId": "tr.com.sutek.istakip",
+    "productName": "SUTEK İş Takip",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "setup.html",
+      "assets/**/*"
+    ],
+    "win": {
+      "icon": "assets/sutek.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "SUTEK-Is-Takip-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": "always",
+      "createStartMenuShortcut": true,
+      "shortcutName": "SUTEK İş Takip",
+      "installerIcon": "assets/sutek.ico",
+      "uninstallerIcon": "assets/sutek.ico"
+    }
+  }
+}
