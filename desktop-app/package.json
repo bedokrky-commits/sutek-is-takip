@@ -10,10 +10,8 @@
     "start": "electron .",
     "dist:win": "electron-builder --win nsis --x64"
   },
-  "dependencies": {
-    "electron": "38.2.0"
-  },
   "devDependencies": {
+    "electron": "38.2.0"
     "electron-builder": "26.0.12"
   },
   "build": {
