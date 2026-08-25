@@ -1,6 +1,6 @@
 {
   "name": "sutek-is-takip-desktop",
-  "version": "2.5.0",
+  "version": "2.5.1",
   "description": "SUTEK İş Takip Windows Masaüstü Uygulaması",
   "main": "main.js",
   "author": "SUTEK",
@@ -11,7 +11,7 @@
     "dist:win": "electron-builder --win nsis --x64"
   },
   "devDependencies": {
-    "electron": "38.2.0"
+    "electron": "38.2.0",
     "electron-builder": "26.0.12"
   },
   "build": {
