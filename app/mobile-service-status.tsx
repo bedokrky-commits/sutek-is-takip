@@ -87,7 +87,7 @@ export default function MobileServiceStatus() {
         supabase
           .from('jobs')
           .select('id,customer_name,service_no,assigned_to,status,scheduled_at')
-          .eq('assigned_to', user.id)
+          .or(`assigned_to.eq.${user.id},assigned_to.is.null`)
           .in('status', ['pending', 'in_progress'])
           .order('scheduled_at', { ascending: true })
       ])
@@ -179,8 +179,8 @@ export default function MobileServiceStatus() {
                 <div className={styles.jobs}>
                   {jobs.slice(0, 4).map(job => (
                     <button key={job.id} disabled={busy} onClick={() => setMyStatus('en_route', job.id)}>
-                      <span><b>{job.customer_name}</b><small>{job.service_no || 'Servis işi'}</small></span>
-                      <strong>🚗 Yola Çık</strong>
+                      <span><b>{job.customer_name}</b><small>{job.service_no || 'Servis işi'}{!job.assigned_to ? ' · Atanmamış' : ''}</small></span>
+                      <strong>{!job.assigned_to ? '🚗 Üstlen & Yola Çık' : '🚗 Yola Çık'}</strong>
                     </button>
                   ))}
                 </div>
