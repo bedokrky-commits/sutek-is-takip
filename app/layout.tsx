@@ -2,6 +2,7 @@ import './styles.css'
 import './v16-professional.css'
 import type { Metadata, Viewport } from 'next'
 import PWARegister from './pwa-register'
+import MobileServiceStatus from './mobile-service-status'
 
 export const metadata: Metadata = {
   title: 'SUTEK İş Takip',
@@ -36,6 +37,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
       <body>
         <PWARegister />
         {children}
+        <MobileServiceStatus />
       </body>
     </html>
   )
